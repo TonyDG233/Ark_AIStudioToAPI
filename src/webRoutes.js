@@ -25,6 +25,29 @@ class WebRoutes {
     }
 
     /**
+     * Get real client IP address, handling various proxy scenarios
+     * Priority: X-Real-IP > X-Forwarded-For (first IP) > req.ip
+     */
+    _getClientIP(req) {
+        // X-Real-IP is set by Nginx and contains the actual client IP
+        if (req.headers["x-real-ip"]) {
+            return req.headers["x-real-ip"];
+        }
+
+        // X-Forwarded-For contains a comma-separated list of IPs
+        // Format: client, proxy1, proxy2, ...
+        // We want the first IP (the original client)
+        if (req.headers["x-forwarded-for"]) {
+            const forwarded = req.headers["x-forwarded-for"].split(",")[0].trim();
+            return forwarded;
+        }
+
+        // Fallback to Express's req.ip (works if trust proxy is configured)
+        // This will be the direct connection IP if no proxy headers exist
+        return req.ip || req.connection.remoteAddress || "unknown";
+    }
+
+    /**
      * Configure session and login related middleware
      */
     setupSession(app) {
@@ -68,26 +91,37 @@ class WebRoutes {
             if (req.session.isAuthenticated) {
                 return res.redirect("/");
             }
-            let errorMessage = "";
+            let errorMessageHtml = "";
             if (req.query.error === "1") {
-                errorMessage = '<p class="error">Invalid API Key!</p>';
+                errorMessageHtml = '<p class="error">Invalid API Key!</p>';
             } else if (req.query.error === "2") {
-                errorMessage = '<p class="error">Too many failed attempts. Please try again in 15 minutes.</p>';
+                errorMessageHtml = '<p class="error">Too many failed attempts. Please try again in 15 minutes.</p>';
             }
             const loginHtml = this._loadTemplate("login.html", {
-                errorMessage,
+                errorMessageHtml,
             });
             res.send(loginHtml);
         });
 
         app.post("/login", (req, res) => {
-            const ip = req.ip;
+            const ip = this._getClientIP(req);
             const now = Date.now();
-            const attempts = this.loginAttempts.get(ip) || { count: 0, lastAttempt: 0 };
+            const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
+            const MAX_ATTEMPTS = 5;
 
-            // Check if IP is rate limited (5 attempts in 15 minutes)
-            if (attempts.count >= 5 && now - attempts.lastAttempt < 15 * 60 * 1000) {
-                this.logger.warn(`[Auth] Rate limit exceeded for IP: ${ip}`);
+            const attempts = this.loginAttempts.get(ip) || { count: 0, firstAttempt: now, lastAttempt: 0 };
+
+            // Clean up old entries (older than rate limit window)
+            if (now - attempts.firstAttempt > RATE_LIMIT_WINDOW) {
+                // Time window expired, reset counter
+                attempts.count = 0;
+                attempts.firstAttempt = now;
+            }
+
+            // Check if IP is rate limited (MAX_ATTEMPTS in RATE_LIMIT_WINDOW)
+            if (attempts.count >= MAX_ATTEMPTS) {
+                const timeLeft = Math.ceil((RATE_LIMIT_WINDOW - (now - attempts.firstAttempt)) / 60000);
+                this.logger.warn(`[Auth] Rate limit exceeded for IP: ${ip}, ${timeLeft} minutes remaining`);
                 return res.redirect("/login?error=2");
             }
 
@@ -111,7 +145,13 @@ class WebRoutes {
                 attempts.count++;
                 attempts.lastAttempt = now;
                 this.loginAttempts.set(ip, attempts);
-                this.logger.warn(`[Auth] Failed login attempt from IP: ${ip} (${attempts.count}/5)`);
+                this.logger.warn(`[Auth] Failed login attempt from IP: ${ip} (${attempts.count}/${MAX_ATTEMPTS})`);
+
+                // Periodic cleanup: remove expired entries from other IPs
+                if (Math.random() < 0.1) { // 10% chance to trigger cleanup
+                    this._cleanupExpiredAttempts(now, RATE_LIMIT_WINDOW);
+                }
+
                 res.redirect("/login?error=1");
             }
         });
@@ -122,6 +162,17 @@ class WebRoutes {
      */
     setupStatusRoutes(app) {
         const isAuthenticated = this.isAuthenticated.bind(this);
+
+        // Health check endpoint (public, no authentication required)
+        app.get("/health", (req, res) => {
+            const healthStatus = {
+                status: "ok",
+                timestamp: new Date().toISOString(),
+                uptime: process.uptime(),
+                browserConnected: !!this.serverSystem.browserManager.browser,
+            };
+            res.status(200).json(healthStatus);
+        });
 
         app.get("/", isAuthenticated, (req, res) => {
             res.status(200).send(this._generateStatusPage());
@@ -204,10 +255,27 @@ class WebRoutes {
         // Replace all {{placeholder}} with corresponding data
         for (const [key, value] of Object.entries(data)) {
             const regex = new RegExp(`{{${key}}}`, "g");
-            template = template.replace(regex, value);
+            // HTML escape the value to prevent XSS (except for pre-built HTML like accountDetailsHtml)
+            const escapedValue = key.endsWith("Html") ? value : this._escapeHtml(String(value));
+            template = template.replace(regex, escapedValue);
         }
 
         return template;
+    }
+
+    /**
+     * Escape HTML to prevent XSS attacks
+     */
+    _escapeHtml(text) {
+        const htmlEscapeMap = {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#x27;",
+            "/": "&#x2F;",
+        };
+        return text.replace(/[&<>"'/]/g, char => htmlEscapeMap[char]);
     }
 
     _getStatusData() {
@@ -268,7 +336,9 @@ class WebRoutes {
                 const name = isInvalid
                     ? "N/A (JSON format error)"
                     : accountNameMap.get(index) || "N/A (Unnamed)";
-                return `<span class="label" style="padding-left: 20px;">Account ${index}</span>: ${name}`;
+                // Escape account name to prevent XSS
+                const escapedName = this._escapeHtml(String(name));
+                return `<span class="label" style="padding-left: 20px;">Account ${index}</span>: ${escapedName}`;
             })
             .join("\n");
 
@@ -288,10 +358,21 @@ class WebRoutes {
             totalScannedAccounts: `[${initialIndices.join(", ")}] (Total: ${initialIndices.length})`,
             accountDetailsHtml,
             formatErrors: `[${invalidIndices.join(", ")}] (Total: ${invalidIndices.length})`,
-            accountOptions: accountOptionsHtml,
+            accountOptionsHtml,
             logCount: logs.length,
-            logs: logs.join("\n"),
+            logs: this._escapeHtml(logs.join("\n")),
         });
+    }
+
+    /**
+     * Clean up expired login attempt records to prevent memory leaks
+     */
+    _cleanupExpiredAttempts(now, rateLimit) {
+        for (const [ip, data] of this.loginAttempts.entries()) {
+            if (now - data.firstAttempt > rateLimit) {
+                this.loginAttempts.delete(ip);
+            }
+        }
     }
 }
 

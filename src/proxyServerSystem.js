@@ -112,6 +112,13 @@ class ProxyServerSystem extends EventEmitter {
 
     _createAuthMiddleware() {
         return (req, res, next) => {
+            // Whitelist paths that don't require API key authentication
+            // Note: /, /api/status use session authentication instead
+            const whitelistPaths = ["/", "/favicon.ico", "/login", "/health", "/api/status", "/api/switch-account", "/api/set-mode", "/api/toggle-force-thinking"];
+            if (whitelistPaths.includes(req.path)) {
+                return next();
+            }
+
             const serverApiKeys = this.config.apiKeys;
             if (!serverApiKeys || serverApiKeys.length === 0) {
                 return next();
@@ -210,6 +217,7 @@ class ProxyServerSystem extends EventEmitter {
                 && req.path !== "/"
                 && req.path !== "/favicon.ico"
                 && req.path !== "/login"
+                && req.path !== "/health"
             ) {
                 this.logger.info(
                     `[Entrypoint] Received a request: ${req.method} ${req.path}`
