@@ -179,6 +179,7 @@ This endpoint is forwarded to the official Gemini API format endpoint.
 
 | Variable | Description | Default |
 | :--- | :--- | :--- |
+| `INITIAL_AUTH_INDEX` | Initial authentication index to use on startup. | `1` |
 | `MAX_RETRIES` | Maximum number of retries for failed requests (only effective for fake streaming and non-streaming). | `3` |
 | `RETRY_DELAY` | Delay between retries in milliseconds. | `2000` |
 | `SWITCH_ON_USES` | Number of requests before automatically switching accounts (0 to disable). | `40` |
