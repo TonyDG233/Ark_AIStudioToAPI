@@ -22,6 +22,17 @@ class WebRoutes {
         this.logger = serverSystem.logger;
         this.config = serverSystem.config;
         this.loginAttempts = new Map(); // Track login attempts for rate limiting
+
+        // Rate limiting configuration from environment variables
+        this.rateLimitEnabled = process.env.RATE_LIMIT_MAX_ATTEMPTS !== "0";
+        this.rateLimitWindow = parseInt(process.env.RATE_LIMIT_WINDOW_MINUTES) || 15; // minutes
+        this.rateLimitMaxAttempts = parseInt(process.env.RATE_LIMIT_MAX_ATTEMPTS) || 5;
+
+        if (this.rateLimitEnabled) {
+            this.logger.info(`[Auth] Rate limiting enabled: ${this.rateLimitMaxAttempts} attempts per ${this.rateLimitWindow} minutes`);
+        } else {
+            this.logger.info("[Auth] Rate limiting disabled");
+        }
     }
 
     /**
@@ -130,29 +141,34 @@ class WebRoutes {
         app.post("/login", (req, res) => {
             const ip = this._getClientIP(req);
             const now = Date.now();
-            const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
-            const MAX_ATTEMPTS = 5;
+            const RATE_LIMIT_WINDOW = this.rateLimitWindow * 60 * 1000; // Convert minutes to milliseconds
+            const MAX_ATTEMPTS = this.rateLimitMaxAttempts;
 
-            const attempts = this.loginAttempts.get(ip) || { count: 0, firstAttempt: now, lastAttempt: 0 };
+            // Skip rate limiting if disabled
+            if (this.rateLimitEnabled) {
+                const attempts = this.loginAttempts.get(ip) || { count: 0, firstAttempt: now, lastAttempt: 0 };
 
-            // Clean up old entries (older than rate limit window)
-            if (now - attempts.firstAttempt > RATE_LIMIT_WINDOW) {
-                // Time window expired, reset counter
-                attempts.count = 0;
-                attempts.firstAttempt = now;
-            }
+                // Clean up old entries (older than rate limit window)
+                if (now - attempts.firstAttempt > RATE_LIMIT_WINDOW) {
+                    // Time window expired, reset counter
+                    attempts.count = 0;
+                    attempts.firstAttempt = now;
+                }
 
-            // Check if IP is rate limited (MAX_ATTEMPTS in RATE_LIMIT_WINDOW)
-            if (attempts.count >= MAX_ATTEMPTS) {
-                const timeLeft = Math.ceil((RATE_LIMIT_WINDOW - (now - attempts.firstAttempt)) / 60000);
-                this.logger.warn(`[Auth] Rate limit exceeded for IP: ${ip}, ${timeLeft} minutes remaining`);
-                return res.redirect("/login?error=2");
+                // Check if IP is rate limited (MAX_ATTEMPTS in RATE_LIMIT_WINDOW)
+                if (attempts.count >= MAX_ATTEMPTS) {
+                    const timeLeft = Math.ceil((RATE_LIMIT_WINDOW - (now - attempts.firstAttempt)) / 60000);
+                    this.logger.warn(`[Auth] Rate limit exceeded for IP: ${ip}, ${timeLeft} minutes remaining`);
+                    return res.redirect("/login?error=2");
+                }
             }
 
             const { apiKey } = req.body;
             if (apiKey && this.config.apiKeys.includes(apiKey)) {
                 // Clear failed attempts on successful login
-                this.loginAttempts.delete(ip);
+                if (this.rateLimitEnabled) {
+                    this.loginAttempts.delete(ip);
+                }
 
                 // Regenerate session to prevent session fixation attacks
                 req.session.regenerate(err => {
@@ -165,15 +181,20 @@ class WebRoutes {
                     res.redirect("/");
                 });
             } else {
-                // Record failed login attempt
-                attempts.count++;
-                attempts.lastAttempt = now;
-                this.loginAttempts.set(ip, attempts);
-                this.logger.warn(`[Auth] Failed login attempt from IP: ${ip} (${attempts.count}/${MAX_ATTEMPTS})`);
+                // Record failed login attempt (only if rate limiting is enabled)
+                if (this.rateLimitEnabled) {
+                    const attempts = this.loginAttempts.get(ip) || { count: 0, firstAttempt: now, lastAttempt: 0 };
+                    attempts.count++;
+                    attempts.lastAttempt = now;
+                    this.loginAttempts.set(ip, attempts);
+                    this.logger.warn(`[Auth] Failed login attempt from IP: ${ip} (${attempts.count}/${MAX_ATTEMPTS})`);
 
-                // Periodic cleanup: remove expired entries from other IPs
-                if (Math.random() < 0.1) { // 10% chance to trigger cleanup
-                    this._cleanupExpiredAttempts(now, RATE_LIMIT_WINDOW);
+                    // Periodic cleanup: remove expired entries from other IPs
+                    if (Math.random() < 0.1) { // 10% chance to trigger cleanup
+                        this._cleanupExpiredAttempts(now, RATE_LIMIT_WINDOW);
+                    }
+                } else {
+                    this.logger.warn(`[Auth] Failed login attempt from IP: ${ip}`);
                 }
 
                 res.redirect("/login?error=1");
