@@ -82,8 +82,8 @@ RUN npm run build:css
 # Remove dev dependencies after build to reduce image size
 RUN npm prune --omit=dev && npm cache clean --force
 
-# Switch to non-root user for enhanced security
-USER node
+# Switch to root user
+USER root
 
 # Expose application ports
 EXPOSE 7860
