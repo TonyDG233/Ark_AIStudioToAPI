@@ -11,7 +11,7 @@ const fs = require("fs");
 const path = require("path");
 
 // --- Configuration Constants ---
-const browserExecutablePath = path.join(__dirname, "..", "camoufox", "camoufox.exe");
+const browserExecutablePath = path.join(__dirname, "..", "..", "camoufox", "camoufox.exe");
 const VALIDATION_LINE_THRESHOLD = 200; // Validation line threshold
 const CONFIG_DIR = "configs/auth"; // Authentication files directory
 
@@ -31,7 +31,7 @@ const ensureDirectoryExists = dirPath => {
  * @returns {number} - The next available index value.
  */
 const getNextAuthIndex = () => {
-    const projectRoot = path.join(__dirname, "..");
+    const projectRoot = path.join(__dirname, "..", "..");
     const directory = path.join(projectRoot, CONFIG_DIR);
 
     if (!fs.existsSync(directory)) {
@@ -56,7 +56,7 @@ const getNextAuthIndex = () => {
 
 (async () => {
     // Use project root directory instead of scripts directory
-    const projectRoot = path.join(__dirname, "..");
+    const projectRoot = path.join(__dirname, "..", "..");
     const configDirPath = path.join(projectRoot, CONFIG_DIR);
     ensureDirectoryExists(configDirPath);
 
