@@ -48,47 +48,9 @@ The API server will be available at `http://localhost:7860`
 
 ### ☁ Cloud Deployment (Linux VPS)
 
-For production deployment on a server (Linux VPS), you need to extract authentication credentials from a Windows machine first.
+For production deployment on a server (Linux VPS), you can now deploy directly using Docker without pre-extracting authentication credentials.
 
-#### 📝 Step 1: Extract Authentication Credentials (on Windows)
-
-1. Clone the repository on a Windows machine:
-
-```powershell
-git clone https://github.com/iBenzene/AIStudioToAPI.git
-cd AIStudioToAPI
-```
-
-2. Run the setup script:
-
-```powershell
-npm run setup-auth
-```
-
-This will:
-
-- Download Camoufox browser automatically
-- Launch the browser and navigate to AI Studio automatically
-- Log in with your Google account
-- Save authentication credentials to `configs/auth/auth-N.json` (where N is an auto-incremented index starting from 0)
-
-**How it works**: The script uses browser automation to capture your AI Studio session cookies and tokens, storing them securely in a JSON file. The authentication file is named with an auto-incremented index (auth-0.json, auth-1.json, etc.) to support multiple accounts. This allows the API to make authenticated requests to AI Studio without requiring interactive login on the server.
-
-3. Locate the authentication file:
-
-```powershell
-ls configs/auth/auth-*.json
-```
-
-4. Copy the auth file to your server:
-
-```powershell
-scp configs/auth/auth-*.json user@your-server:/path/to/deployment/configs/auth/
-```
-
-5. You can now delete the cloned repository from your Windows machine.
-
-#### 🚢 Step 2: Deploy on Server
+#### 🚢 Step 1: Deploy on Server
 
 ##### 🐋 Option 1: Docker Command
 
@@ -149,7 +111,25 @@ Stop the service:
 sudo docker compose down
 ```
 
-##### 🌐 Step 3 (Optional): Nginx Reverse Proxy
+#### 🔑 Step 2: Account Management
+
+After deployment, you need to add Google accounts using one of these methods:
+
+**Method 1: VNC-Based Login (Recommended)**
+
+- Visit the homepage and click the "Add User" button
+- You'll be redirected to a VNC page with a browser instance
+- Log in to your Google account
+- The account will be automatically saved as `auth-N.json` (N starts from 0)
+
+**Method 2: Upload Auth Files (Legacy)**
+
+- Run `npm run setup-auth` on a Windows machine to generate auth files
+- Upload `auth-N.json` files (N starts from 0) to the mounted `/path/to/auth` directory
+
+> **Note**: Environment variable-based auth injection is no longer supported.
+
+#### 🌐 Step 3 (Optional): Nginx Reverse Proxy
 
 If you need to access via a domain name or want unified management at the reverse proxy layer (e.g., configure HTTPS, load balancing, etc.), you can use Nginx.
 
@@ -194,7 +174,7 @@ This endpoint is forwarded to the official Gemini API format endpoint.
 
 | Variable                        | Description                                                                                          | Default   |
 | :------------------------------ | :--------------------------------------------------------------------------------------------------- | :-------- |
-| `INITIAL_AUTH_INDEX`            | Initial authentication index to use on startup.                                                      | `1`       |
+| `INITIAL_AUTH_INDEX`            | Initial authentication index to use on startup.                                                      | `0`       |
 | `MAX_RETRIES`                   | Maximum number of retries for failed requests (only effective for fake streaming and non-streaming). | `3`       |
 | `RETRY_DELAY`                   | Delay between retries in milliseconds.                                                               | `2000`    |
 | `SWITCH_ON_USES`                | Number of requests before automatically switching accounts (0 to disable).                           | `40`      |

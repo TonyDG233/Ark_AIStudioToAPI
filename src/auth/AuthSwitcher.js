@@ -103,7 +103,7 @@ class AuthSwitcher {
             this.logger.info("==================================================");
 
             const failedAccounts = [];
-            // If no current account (currentAuthIndex=0), start from i=0 to try all accounts
+            // If no current account (currentAuthIndex=-1), start from i=0 to try all accounts
             // If has current account, start from i=1 to skip current and try others
             const startOffset = hasCurrentAccount ? 1 : 0;
             const tryCount = hasCurrentAccount ? available.length - 1 : available.length;
@@ -166,7 +166,7 @@ class AuthSwitcher {
                     failedAccounts.push(originalStartAccount);
 
                     // Throw fallback failure error with detailed information
-                    this.currentAuthIndex = 0;
+                    this.currentAuthIndex = -1;
                     throw new Error(
                         `Fallback failed reason: All accounts failed including fallback to #${originalStartAccount}. Failed accounts: [${failedAccounts.join(", ")}]`
                     );
@@ -177,7 +177,7 @@ class AuthSwitcher {
             this.logger.error(
                 `FATAL: All ${available.length} accounts failed! Failed accounts: [${failedAccounts.join(", ")}]`
             );
-            this.currentAuthIndex = 0;
+            this.currentAuthIndex = -1;
             throw new Error(
                 `Switching to account failed: All ${available.length} available accounts failed to initialize. Failed accounts: [${failedAccounts.join(", ")}]`
             );

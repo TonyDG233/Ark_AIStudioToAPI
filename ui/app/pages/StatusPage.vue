@@ -280,7 +280,7 @@ const state = reactive({
     accountDetails: [],
     apiKeySource: "",
     browserConnected: false,
-    currentAuthIndex: 0,
+    currentAuthIndex: -1,
     failureCount: 0,
     forceThinkingEnabled: false,
     forceUrlContextEnabled: false,
@@ -310,7 +310,7 @@ const browserConnectedClass = computed(() => (state.browserConnected ? "status-o
 const browserConnectedText = computed(() => (state.browserConnected ? t("running") : t("disconnected")));
 
 const currentAccountName = computed(() => {
-    if (state.currentAuthIndex === null || state.currentAuthIndex <= 0) {
+    if (state.currentAuthIndex < 0) {
         return t("noActiveAccount");
     }
     const account = state.accountDetails.find(acc => acc.index === state.currentAuthIndex);
@@ -318,7 +318,7 @@ const currentAccountName = computed(() => {
 });
 
 const currentAccountNameClass = computed(() => {
-    if (state.currentAuthIndex === null || state.currentAuthIndex <= 0) {
+    if (state.currentAuthIndex < 0) {
         return "status-error";
     }
     const account = state.accountDetails.find(acc => acc.index === state.currentAuthIndex);

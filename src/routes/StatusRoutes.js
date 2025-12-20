@@ -94,7 +94,7 @@ class StatusRoutes {
             if (browserManager.browser) {
                 const currentAuthIndex = requestHandler.currentAuthIndex;
 
-                if (currentAuthIndex === null || !authSource.availableIndices.includes(currentAuthIndex)) {
+                if (currentAuthIndex === -1 || !authSource.availableIndices.includes(currentAuthIndex)) {
                     this.logger.warn(
                         `[System] Current auth index #${currentAuthIndex} is no longer valid after reload (e.g., file deleted).`
                     );
@@ -178,7 +178,7 @@ class StatusRoutes {
                         this.logger.error(`[WebUI] Error closing browser after account deletion: ${err.message}`);
                     });
                     // Reset current account index through browserManager
-                    this.serverSystem.browserManager.currentAuthIndex = 0;
+                    this.serverSystem.browserManager.currentAuthIndex = -1;
                 }
 
                 this.logger.warn(
@@ -294,63 +294,6 @@ class StatusRoutes {
                 usageCount,
             },
         };
-    }
-
-    _generateStatusPage() {
-        const { config, requestHandler, authSource, browserManager } = this.serverSystem;
-        const initialIndices = authSource.initialIndices || [];
-        const availableIndices = authSource.availableIndices || [];
-        const invalidIndices = initialIndices.filter(i => !availableIndices.includes(i));
-        const logs = this.logger.logBuffer || [];
-
-        const accountNameMap = authSource.accountNameMap;
-        const accountDetailsHtml = initialIndices
-            .map(index => {
-                const isInvalid = invalidIndices.includes(index);
-                const name = isInvalid ? "N/A (JSON format error)" : accountNameMap.get(index) || "N/A (Unnamed)";
-
-                // Escape account name to prevent XSS
-                const escapedName = this._escapeHtml(String(name));
-                return `<span class="label" style="padding-left: 20px;">Account ${index}</span>: ${escapedName}`;
-            })
-            .join("\n");
-
-        const currentAuthIndex = requestHandler.currentAuthIndex;
-        const accountOptionsHtml = availableIndices
-            .map(index => {
-                const selected = index === currentAuthIndex ? " selected" : "";
-                return `<option value="${index}"${selected}>Account #${index}</option>`;
-            })
-            .join("");
-
-        const currentAccountName = accountNameMap.get(currentAuthIndex) || "N/A";
-
-        const usageCount =
-            config.switchOnUses > 0
-                ? `${requestHandler.usageCount} / ${config.switchOnUses}`
-                : requestHandler.usageCount;
-
-        const failureCount =
-            config.failureThreshold > 0
-                ? `${requestHandler.failureCount} / ${config.failureThreshold}`
-                : requestHandler.failureCount;
-
-        return this._loadTemplate("status.html", {
-            accountDetailsHtml,
-            accountOptionsHtml,
-            apiKeySource: config.apiKeySource,
-            browserConnected: !!browserManager.browser,
-            currentAccountName: this._escapeHtml(currentAccountName),
-            currentAuthIndex,
-            failureCount,
-            initialForceThinking: String(this.serverSystem.forceThinking),
-            initialForceUrlContext: String(this.serverSystem.forceUrlContext),
-            initialForceWebSearch: String(this.serverSystem.forceWebSearch),
-            initialStreamingMode: config.streamingMode,
-            logCount: logs.length,
-            logs: this._escapeHtml(logs.join("\n")),
-            usageCount,
-        });
     }
 
     /**

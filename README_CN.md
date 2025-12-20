@@ -48,47 +48,9 @@ API 服务将在 `http://localhost:7860` 上运行。
 
 ### ☁ 云端部署（Linux VPS）
 
-在生产环境中部署到服务器（Linux VPS）时，需要先从 Windows 机器中提取身份验证凭据。
+在生产环境中部署到服务器（Linux VPS）时，现在可以直接使用 Docker 部署，无需预先提取身份验证凭据。
 
-#### 📝 步骤 1：提取身份验证凭据（在 Windows 上）
-
-1. 在 Windows 机器上克隆仓库：
-
-```powershell
-git clone https://github.com/iBenzene/AIStudioToAPI.git
-cd AIStudioToAPI
-```
-
-2. 运行设置脚本：
-
-```powershell
-npm run setup-auth
-```
-
-这将：
-
-- 自动下载 Camoufox 浏览器
-- 启动浏览器并自动导航到 AI Studio
-- 手动登录你的 Google 账号
-- 将身份验证凭据保存到 `configs/auth/auth-N.json`（其中 N 是从 0 开始自动递增的索引）
-
-**工作原理**：脚本使用浏览器自动化技术捕获您的 AI Studio 会话 Cookie 和令牌，并将它们安全地存储在 JSON 文件中。认证文件使用自动递增的索引命名（auth-0.json、auth-1.json 等）以支持多个账号。这样 API 就可以在服务器上进行经过身份验证的请求，而无需交互式登录。
-
-3. 找到身份验证文件：
-
-```powershell
-ls configs/auth/auth-*.json
-```
-
-4. 将认证文件复制到服务器：
-
-```powershell
-scp configs/auth/auth-*.json user@your-server:/path/to/deployment/configs/auth/
-```
-
-5. 现在可以从 Windows 机器中删除克隆的仓库了。
-
-#### 🚢 步骤 2：部署到服务器
+#### 🚢 步骤 1：部署到服务器
 
 ##### 🐋 方式 1：Docker 命令
 
@@ -149,7 +111,25 @@ sudo docker compose logs -f
 sudo docker compose down
 ```
 
-##### 🌐 步骤 3（可选）：使用 Nginx 反向代理
+#### 🔑 步骤 2：账户管理
+
+部署后，您需要使用以下方式之一添加 Google 账户：
+
+**方法 1：VNC 登录（推荐）**
+
+- 访问主页并点击"添加账户"按钮
+- 将跳转到 VNC 页面，显示浏览器实例
+- 登录您的 Google 账户
+- 账户将自动保存为 `auth-N.json`（N 从 0 开始）
+
+**方法 2：上传认证文件（传统方式）**
+
+- 在 Windows 机器上运行 `npm run setup-auth` 生成认证文件
+- 将 `auth-N.json` 文件（N 从 0 开始）上传到挂载的 `/path/to/auth` 目录
+
+> **注意**：不再支持通过环境变量注入认证信息。
+
+#### 🌐 步骤 3（可选）：使用 Nginx 反向代理
 
 如果需要通过域名访问或希望在反向代理层统一管理（例如配置 HTTPS、负载均衡等），可以使用 Nginx。
 
@@ -194,7 +174,7 @@ sudo docker compose down
 
 | 变量名                          | 描述                                                 | 默认值    |
 | :------------------------------ | :--------------------------------------------------- | :-------- |
-| `INITIAL_AUTH_INDEX`            | 启动时使用的初始身份验证索引。                       | `1`       |
+| `INITIAL_AUTH_INDEX`            | 启动时使用的初始身份验证索引。                       | `0`       |
 | `MAX_RETRIES`                   | 请求失败后的最大重试次数（仅对假流式和非流式生效）。 | `3`       |
 | `RETRY_DELAY`                   | 两次重试之间的间隔（毫秒）。                         | `2000`    |
 | `SWITCH_ON_USES`                | 自动切换帐户前允许的请求次数（设为 0 禁用）。        | `40`      |

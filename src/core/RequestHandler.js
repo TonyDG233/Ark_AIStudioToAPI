@@ -80,8 +80,8 @@ class RequestHandler {
      * Handle browser recovery when connection is lost
      *
      * Important: isSystemBusy flag management strategy:
-     * - Direct recovery (recoveryAuthIndex > 0): We manually set and reset isSystemBusy
-     * - Switch to next account (recoveryAuthIndex = 0): Let switchToNextAuth() manage isSystemBusy internally
+     * - Direct recovery (recoveryAuthIndex >= 0): We manually set and reset isSystemBusy
+     * - Switch to next account (recoveryAuthIndex = -1): Let switchToNextAuth() manage isSystemBusy internally
      * - This prevents the bug where isSystemBusy is set here, then switchToNextAuth() checks it and returns "already in progress"
      *
      * @returns {boolean} true if recovery successful, false otherwise
@@ -103,12 +103,12 @@ class RequestHandler {
             "❌ [System] Browser WebSocket connection disconnected! Possible process crash. Attempting recovery..."
         );
 
-        const recoveryAuthIndex = this.currentAuthIndex || 0;
+        const recoveryAuthIndex = this.currentAuthIndex;
         let wasDirectRecovery = false;
         let recoverySuccess = false;
 
         try {
-            if (recoveryAuthIndex > 0) {
+            if (recoveryAuthIndex >= 0) {
                 // Direct recovery: we manage isSystemBusy ourselves
                 wasDirectRecovery = true;
                 this.authSwitcher.isSystemBusy = true;

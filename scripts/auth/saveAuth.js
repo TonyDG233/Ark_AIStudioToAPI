@@ -28,6 +28,7 @@ const ensureDirectoryExists = dirPath => {
 
 /**
  * Gets the next available authentication file index from the 'configs/auth' directory.
+ * Uses the same logic as CreateAuth.js: finds the first available index starting from 0.
  * @returns {number} - The next available index value.
  */
 const getNextAuthIndex = () => {
@@ -38,20 +39,12 @@ const getNextAuthIndex = () => {
         return 0;
     }
 
-    const files = fs.readdirSync(directory);
-    const authRegex = /^auth-(\d+)\.json$/;
-
-    let maxIndex = -1;
-    files.forEach(file => {
-        const match = file.match(authRegex);
-        if (match) {
-            const currentIndex = parseInt(match[1], 10);
-            if (currentIndex > maxIndex) {
-                maxIndex = currentIndex;
-            }
-        }
-    });
-    return maxIndex + 1;
+    // Find the first non-existent index starting from 0
+    let nextIndex = 0;
+    while (fs.existsSync(path.join(directory, `auth-${nextIndex}.json`))) {
+        nextIndex++;
+    }
+    return nextIndex;
 };
 
 (async () => {

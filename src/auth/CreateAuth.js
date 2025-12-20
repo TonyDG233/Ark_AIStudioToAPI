@@ -307,7 +307,7 @@ class CreateAuth {
                 fs.mkdirSync(configDir, { recursive: true });
             }
 
-            let nextAuthIndex = 1;
+            let nextAuthIndex = 0;
             while (fs.existsSync(path.join(configDir, `auth-${nextAuthIndex}.json`))) {
                 nextAuthIndex++;
             }
