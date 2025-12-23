@@ -64,9 +64,6 @@ class ProxyServerSystem extends EventEmitter {
 
         if (allAvailableIndices.length === 0) {
             this.logger.warn("[System] No available authentication source. Starting in account binding mode.");
-            await this._startHttpServer();
-            await this._startWebSocketServer();
-            this.logger.info(`[System] Proxy server system startup complete in account binding mode.`);
             this.emit("started");
             return; // Exit early
         }
