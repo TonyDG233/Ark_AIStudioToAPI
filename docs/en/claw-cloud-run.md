@@ -2,7 +2,7 @@
 
 This guide will help you deploy the `aistudio-to-api` service on [Claw Cloud Run](https://claw.cloud/).
 
-## Deployment Steps
+## 📦 Deployment Steps
 
 1. **Login**: Go to [https://us-west-1.run.claw.cloud/](https://us-west-1.run.claw.cloud/) and log in to your account.
 2. **Create App**: Navigate to **App Launchpad** and click the **Create App** button in the top right corner.
@@ -19,6 +19,10 @@ This guide will help you deploy the `aistudio-to-api` service on [Claw Cloud Run
    - **Container Port**: `7860`
    - **Public Access**: Toggle **On** (Leave the URL usage as is).
 
+   **Local Storage**:
+   - **Capacity**：1
+   - **Mount Path**：/app/configs/auth
+
    **Environment Variables**:
 
    You must set the `API_KEYS` variable. Other variables are optional (refer to the [Configuration](../../README.md#-configuration) section in the main README).
@@ -29,7 +33,7 @@ This guide will help you deploy the `aistudio-to-api` service on [Claw Cloud Run
 
 4. **Deploy**: Click **Create App** to start the deployment.
 
-## Accessing the Service
+## 📡 Accessing the Service
 
 1. Once the app is running, go to the **Network** tab in the App details page.
 2. Copy the **Public Address** (URL).
