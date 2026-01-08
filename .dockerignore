@@ -66,5 +66,5 @@ temp
 *.zip
 camoufox*
 
-# Auth setup scripts (Windows-specific, not needed in Linux container)
-scripts/setupAuth.bat
+# Auth setup scripts (not needed in Linux container)
+scripts/auth

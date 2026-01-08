@@ -2,7 +2,8 @@
  * File: scripts/auth/setupAuth.js
  * Description: Cross-platform auth setup helper. Installs dependencies, downloads Camoufox, and runs saveAuth.js.
  *
- * Maintainers: iBenzene, bbbugg
+ * Maintainers: iBenzene, bbbugg, MasakiMu319
+ * Original Author: Ellinav
  */
 
 const { spawnSync } = require("child_process");
@@ -49,33 +50,33 @@ const getCamoufoxInstallConfig = () => {
     if (platform === "win32") {
         const dir = path.join(PROJECT_ROOT, "camoufox");
         return {
-            platform,
-            installDir: dir,
-            expectedExecutablePath: path.join(dir, "camoufox.exe"),
-            expectedExecutableName: "camoufox.exe",
             expectedAppDirName: null,
+            expectedExecutableName: "camoufox.exe",
+            expectedExecutablePath: path.join(dir, "camoufox.exe"),
+            installDir: dir,
+            platform,
         };
     }
 
     if (platform === "linux") {
         const dir = path.join(PROJECT_ROOT, "camoufox-linux");
         return {
-            platform,
-            installDir: dir,
-            expectedExecutablePath: path.join(dir, "camoufox"),
-            expectedExecutableName: "camoufox",
             expectedAppDirName: null,
+            expectedExecutableName: "camoufox",
+            expectedExecutablePath: path.join(dir, "camoufox"),
+            installDir: dir,
+            platform,
         };
     }
 
     if (platform === "darwin") {
         const dir = path.join(PROJECT_ROOT, "camoufox-macos");
         return {
-            platform,
-            installDir: dir,
-            expectedExecutablePath: path.join(dir, "Camoufox.app", "Contents", "MacOS", "camoufox"),
-            expectedExecutableName: "camoufox",
             expectedAppDirName: "Camoufox.app",
+            expectedExecutableName: "camoufox",
+            expectedExecutablePath: path.join(dir, "Camoufox.app", "Contents", "MacOS", "camoufox"),
+            installDir: dir,
+            platform,
         };
     }
 
@@ -91,17 +92,12 @@ const downloadFile = async (url, outFilePath) => {
                 currentUrl,
                 {
                     headers: {
-                        "User-Agent": "aistudio-to-api setup-auth",
                         Accept: "*/*",
+                        "User-Agent": "aistudio-to-api setup-auth",
                     },
                 },
                 res => {
-                    if (
-                        res.statusCode &&
-                        res.statusCode >= 300 &&
-                        res.statusCode < 400 &&
-                        res.headers.location
-                    ) {
+                    if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
                         res.resume();
                         if (redirectsLeft <= 0) {
                             reject(new Error(`Too many redirects while downloading: ${url}`));
@@ -142,31 +138,33 @@ const downloadFile = async (url, outFilePath) => {
 
 const fetchJson = async url =>
     new Promise((resolve, reject) => {
-        https.get(
-            url,
-            {
-                headers: {
-                    "User-Agent": "aistudio-to-api setup-auth",
-                    Accept: "application/vnd.github+json",
+        https
+            .get(
+                url,
+                {
+                    headers: {
+                        Accept: "application/vnd.github+json",
+                        "User-Agent": "aistudio-to-api setup-auth",
+                    },
                 },
-            },
-            res => {
-                const chunks = [];
-                res.on("data", chunk => chunks.push(chunk));
-                res.on("end", () => {
-                    const body = Buffer.concat(chunks).toString("utf-8");
-                    if (res.statusCode !== 200) {
-                        reject(new Error(`GitHub API request failed (${res.statusCode}): ${body.slice(0, 300)}`));
-                        return;
-                    }
-                    try {
-                        resolve(JSON.parse(body));
-                    } catch (error) {
-                        reject(new Error(`Failed to parse GitHub API response: ${error.message}`));
-                    }
-                });
-            }
-        ).on("error", reject);
+                res => {
+                    const chunks = [];
+                    res.on("data", chunk => chunks.push(chunk));
+                    res.on("end", () => {
+                        const body = Buffer.concat(chunks).toString("utf-8");
+                        if (res.statusCode !== 200) {
+                            reject(new Error(`GitHub API request failed (${res.statusCode}): ${body.slice(0, 300)}`));
+                            return;
+                        }
+                        try {
+                            resolve(JSON.parse(body));
+                        } catch (error) {
+                            reject(new Error(`Failed to parse GitHub API response: ${error.message}`));
+                        }
+                    });
+                }
+            )
+            .on("error", reject);
     });
 
 const selectCamoufoxAsset = (assets, platform, arch) => {
@@ -233,7 +231,7 @@ const extractZip = (zipFilePath, destinationDir) => {
 };
 
 const walkFiles = (rootDir, maxDepth, onEntry) => {
-    const stack = [{ dir: rootDir, depth: 0 }];
+    const stack = [{ depth: 0, dir: rootDir }];
     while (stack.length > 0) {
         const current = stack.pop();
         const entries = fs.readdirSync(current.dir, { withFileTypes: true });
@@ -241,7 +239,7 @@ const walkFiles = (rootDir, maxDepth, onEntry) => {
             const fullPath = path.join(current.dir, entry.name);
             onEntry(fullPath, entry);
             if (entry.isDirectory() && current.depth < maxDepth) {
-                stack.push({ dir: fullPath, depth: current.depth + 1 });
+                stack.push({ depth: current.depth + 1, dir: fullPath });
             }
         }
     }
@@ -257,7 +255,8 @@ const locatePath = (rootDir, maxDepth, predicate) => {
 };
 
 const ensureCamoufoxExecutable = async () => {
-    const { installDir, expectedExecutablePath, expectedExecutableName, expectedAppDirName } = getCamoufoxInstallConfig();
+    const { installDir, expectedExecutablePath, expectedExecutableName, expectedAppDirName } =
+        getCamoufoxInstallConfig();
 
     if (pathExists(expectedExecutablePath)) return expectedExecutablePath;
 
@@ -273,9 +272,7 @@ const ensureCamoufoxExecutable = async () => {
         const asset = selectCamoufoxAsset(release?.assets, process.platform, process.arch);
 
         if (!asset?.browser_download_url) {
-            const assetNames = Array.isArray(release?.assets)
-                ? release.assets.map(a => a?.name).filter(Boolean)
-                : [];
+            const assetNames = Array.isArray(release?.assets) ? release.assets.map(a => a?.name).filter(Boolean) : [];
             throw new Error(
                 [
                     `Unable to find a Camoufox asset for platform=${process.platform} arch=${process.arch}.`,
@@ -283,7 +280,9 @@ const ensureCamoufoxExecutable = async () => {
                         PROJECT_ROOT,
                         installDir
                     )}.`,
-                    assetNames.length > 0 ? `Available assets: ${assetNames.join(", ")}` : "No assets found in release.",
+                    assetNames.length > 0
+                        ? `Available assets: ${assetNames.join(", ")}`
+                        : "No assets found in release.",
                 ].join("\n")
             );
         }
@@ -313,7 +312,11 @@ const ensureCamoufoxExecutable = async () => {
 
     if (!pathExists(expectedExecutablePath)) {
         if (expectedAppDirName) {
-            const foundApp = locatePath(installDir, 4, (fullPath, entry) => entry.isDirectory() && entry.name === expectedAppDirName);
+            const foundApp = locatePath(
+                installDir,
+                4,
+                (fullPath, entry) => entry.isDirectory() && entry.name === expectedAppDirName
+            );
             if (foundApp) {
                 const targetApp = path.join(installDir, expectedAppDirName);
                 if (!pathExists(targetApp)) {
@@ -382,8 +385,8 @@ const runSaveAuth = camoufoxExecutablePath => {
 
     const result = spawnSync(process.execPath, [path.join("scripts", "auth", "saveAuth.js")], {
         cwd: PROJECT_ROOT,
-        stdio: "inherit",
         env,
+        stdio: "inherit",
     });
 
     if (result.error) throw result.error;
@@ -422,7 +425,7 @@ const main = async () => {
     if (process.platform === "darwin") {
         console.log("");
         console.log(
-            'macOS 提示：如果首次运行被 Gatekeeper 阻止，请到「系统设置 -> 隐私与安全性」允许该应用后重试。'
+            'If the first run is blocked by Gatekeeper, please go to "System Settings -> Privacy & Security" to allow the app and try again.'
         );
     }
 
@@ -442,4 +445,3 @@ main().catch(error => {
     console.error("ERROR:", error?.message || error);
     process.exit(1);
 });
-
