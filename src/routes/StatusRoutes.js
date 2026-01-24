@@ -2,8 +2,7 @@
  * File: src/routes/StatusRoutes.js
  * Description: Status and system management routes
  *
- * Maintainers: iBenzene, bbbugg
- * Original Author: Ellinav
+ * Author: Ellinav, iBenzene, bbbugg
  */
 
 const fs = require("fs");
@@ -255,7 +254,7 @@ class StatusRoutes {
 
             const { authSource } = this.serverSystem;
 
-            if (!authSource.availableIndices.includes(targetIndex)) {
+            if (!authSource.initialIndices.includes(targetIndex)) {
                 return res.status(404).json({ index: targetIndex, message: "errorAccountNotFound" });
             }
 

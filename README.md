@@ -252,7 +252,8 @@ sudo docker compose down
 
 本项目基于 [**ais2api**](https://github.com/Ellinav/ais2api)（作者：[**Ellinav**](https://github.com/Ellinav)）分支开发，并完全沿用上游项目所采用的 CC BY-NC 4.0 许可证，其使用、分发与修改行为均需遵守原有许可证的全部条款，完整许可的内容请参见 [LICENSE](LICENSE) 文件。
 
-### ©️ 版权 / 署名
+## 🤝 贡献者
 
-- 原始作品 Copyright © [Ellinav](https://github.com/Ellinav)
-- 修改与新增部分 Copyright © 2024 [iBenzene](https://github.com/iBenzene)、[bbbugg](https://github.com/bbbugg)、[挈挈](https://github.com/ljh156705)及其他贡献者
+[![Contributors](https://contrib.rocks/image?repo=iBUHub/AIStudioToAPI)](https://github.com/iBUHub/AIStudioToAPI/graphs/contributors)
+
+感谢所有为本项目付出汗水与智慧的开发者。
