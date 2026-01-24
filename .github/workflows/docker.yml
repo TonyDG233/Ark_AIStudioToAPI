@@ -15,6 +15,7 @@ env:
   IMAGE_NAME_PRIMARY: ibuhub/aistudio-to-api
   IMAGE_NAME_LEGACY: ibenzene/aistudio-to-api
   DOCKERHUB_REPO: ibuhub/aistudio-to-api
+  DOCKERHUB_REPO_LEGACY: ibenzene/aistudio-to-api
   VERSION: ${{ github.ref_name }}
 
 jobs:
@@ -66,12 +67,19 @@ jobs:
           username: ibenzene
           password: ${{ secrets.LEGACY_REGISTRY_TOKEN }}
 
-      - name: Log into Docker Hub
+      - name: Log into Docker Hub (ibuhub)
         if: github.event_name != 'pull_request'
         uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
         with:
           username: ibuhub
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log into Docker Hub (ibenzene)
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
+        with:
+          username: ibenzene
+          password: ${{ secrets.DOCKERHUB_TOKEN_LEGACY }}
 
       - name: Extract Docker metadata
         id: meta
@@ -81,6 +89,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PRIMARY }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LEGACY }}
             ${{ env.DOCKERHUB_REPO }}
+            ${{ env.DOCKERHUB_REPO_LEGACY }}
           tags: |
             type=ref,event=tag
             type=raw,value=${{ steps.generate_tag.outputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}

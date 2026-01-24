@@ -70,6 +70,8 @@ docker run -d \
   ghcr.io/ibuhub/aistudio-to-api:latest
 ```
 
+> 💡 **提示：** 如果 `ghcr.io` 访问速度较慢或不可用，可以使用 Docker Hub 镜像：`ibuhub/aistudio-to-api:latest`。
+
 参数说明：
 
 - `-p 7860:7860`：API 服务器端口（如果使用反向代理，强烈建议改成 127.0.0.1:7860）
@@ -97,6 +99,8 @@ services:
       API_KEYS: your-api-key-1,your-api-key-2
       TZ: Asia/Shanghai # 日志时区设置（可选）
 ```
+
+> 💡 **提示：** 如果 `ghcr.io` 访问速度较慢或不可用，可以将 `image` 改为 `ibuhub/aistudio-to-api:latest`。
 
 启动服务：
 

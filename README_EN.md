@@ -70,6 +70,8 @@ docker run -d \
   ghcr.io/ibuhub/aistudio-to-api:latest
 ```
 
+> 💡 **Tip:** If `ghcr.io` is slow or unavailable, you can use the Docker Hub image: `ibuhub/aistudio-to-api:latest`.
+
 Parameters:
 
 - `-p 7860:7860`: API server port (if using a reverse proxy, strongly consider `127.0.0.1:7860`)
