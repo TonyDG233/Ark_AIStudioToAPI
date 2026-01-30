@@ -50,6 +50,7 @@ class BrowserManager {
             "browser.shell.checkDefaultBrowser": false, // Skip default browser check
             "browser.tabs.warnOnClose": false, // No warning on closing tabs
             "datareporting.policy.dataSubmissionEnabled": false, // Disable data reporting
+            "dom.security.https_only_mode": false, // Disable HTTPS-Only mode, allowing mixed content
             "dom.webnotifications.enabled": false, // Disable notifications
             "extensions.update.enabled": false, // Disable extension auto-update
             "general.smoothScroll": false, // Disable smooth scrolling
@@ -58,9 +59,13 @@ class BrowserManager {
             "media.autoplay.default": 5, // 5 = Block all autoplay
             "media.volume_scale": "0.0", // Mute audio
             "network.dns.disablePrefetch": true, // Disable DNS prefetching
+            "network.http.cors_safelisting_broken_servers": true, // Allow responses from non-standard CORS servers
             "network.http.speculative-parallel-limit": 0, // Disable speculative connections
             "network.prefetch-next": false, // Disable link prefetching
             "permissions.default.geo": 0, // 0 = Always deny geolocation
+            "security.csp.enable": false, // Disable CSP (Content Security Policy) to prevent script injection blocking
+            "security.fileuri.strict_origin_policy": false, // Allow local file resource access, relaxing file domain restrictions
+            "security.mixed_content.block_active_content": false, // Allow HTTPS pages to load HTTP resources (images/scripts)
             "services.sync.enabled": false, // Disable Firefox Sync
             "toolkit.cosmeticAnimations.enabled": false, // Disable UI animations
             "toolkit.telemetry.archive.enabled": false, // Disable telemetry archive
