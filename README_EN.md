@@ -238,12 +238,13 @@ This endpoint is forwarded to the official Gemini API format endpoint.
 
 #### 🗒️ Other Configuration
 
-| Variable            | Description                                                           | Default |
-| :------------------ | :-------------------------------------------------------------------- | :------ |
-| `STREAMING_MODE`    | Streaming mode. `real` for real streaming, `fake` for fake streaming. | `real`  |
-| `FORCE_THINKING`    | Force enable thinking mode for all requests.                          | `false` |
-| `FORCE_WEB_SEARCH`  | Force enable web search for all requests.                             | `false` |
-| `FORCE_URL_CONTEXT` | Force enable URL context for all requests.                            | `false` |
+| Variable                   | Description                                                                              | Default       |
+| :------------------------- | :--------------------------------------------------------------------------------------- | :------------ |
+| `STREAMING_MODE`           | Streaming mode. `real` for real streaming, `fake` for fake streaming.                    | `real`        |
+| `FORCE_THINKING`           | Force enable thinking mode for all requests.                                             | `false`       |
+| `FORCE_WEB_SEARCH`         | Force enable web search for all requests.                                                | `false`       |
+| `FORCE_URL_CONTEXT`        | Force enable URL context for all requests.                                               | `false`       |
+| `CAMOUFOX_EXECUTABLE_PATH` | Absolute path to the Camoufox browser executable (only required if manually downloaded). | Auto-detected |
 
 ### 🧠 Model List Configuration
 

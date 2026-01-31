@@ -240,12 +240,13 @@ sudo docker compose down
 
 #### 🗒️ 其他配置
 
-| 变量名              | 描述                                             | 默认值  |
-| :------------------ | :----------------------------------------------- | :------ |
-| `STREAMING_MODE`    | 流式传输模式。`real` 为真流式，`fake` 为假流式。 | `real`  |
-| `FORCE_THINKING`    | 强制为所有请求启用思考模式。                     | `false` |
-| `FORCE_WEB_SEARCH`  | 强制为所有请求启用网络搜索。                     | `false` |
-| `FORCE_URL_CONTEXT` | 强制为所有请求启用 URL 上下文。                  | `false` |
+| 变量名                     | 描述                                                                  | 默认值   |
+| :------------------------- | :-------------------------------------------------------------------- | :------- |
+| `STREAMING_MODE`           | 流式传输模式。`real` 为真流式，`fake` 为假流式。                      | `real`   |
+| `FORCE_THINKING`           | 强制为所有请求启用思考模式。                                          | `false`  |
+| `FORCE_WEB_SEARCH`         | 强制为所有请求启用网络搜索。                                          | `false`  |
+| `FORCE_URL_CONTEXT`        | 强制为所有请求启用 URL 上下文。                                       | `false`  |
+| `CAMOUFOX_EXECUTABLE_PATH` | Camoufox 浏览器的可执行文件绝对路径（仅在手动下载浏览器时需要配置）。 | 自动检测 |
 
 ### 🧠 模型列表配置
 
