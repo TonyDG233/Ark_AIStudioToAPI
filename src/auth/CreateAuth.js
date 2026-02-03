@@ -510,6 +510,63 @@ class CreateAuth {
 
             this.logger.info(`[VNC] Saved new auth file: ${newAuthFilePath}`);
 
+            // =========================================================================
+            // [Feature] Sync to Persistent Cache (User Request: "Save context too")
+            // Logic: Create the cache directory and seed it with a temporary persistent browser
+            // =========================================================================
+            try {
+                this.logger.info(`[VNC] Syncing VNC state to persistent cache for account #${nextAuthIndex}...`);
+                const cacheDir = path.join(process.cwd(), "cache", `auth-${nextAuthIndex}`);
+                if (!fs.existsSync(cacheDir)) {
+                    fs.mkdirSync(cacheDir, { recursive: true });
+                }
+
+                // 1. Save storage-state.json (for BrowserManager referencing)
+                const storageStatePath = path.join(cacheDir, "storage-state.json");
+                fs.writeFileSync(storageStatePath, JSON.stringify(authData, null, 2));
+
+                // 2. Save meta.json
+                const metaVal = {
+                    accountName,
+                    authIndex: nextAuthIndex,
+                    contextOptions: {
+                        deviceScaleFactor: 1,
+                        viewport: { height: 1080, width: 1920 }, // Default for now
+                    },
+                    createdAt: new Date().toISOString(),
+                    storageStatePath: "storage-state.json",
+                    updatedAt: new Date().toISOString(),
+                    version: 1,
+                };
+                fs.writeFileSync(path.join(cacheDir, "meta.json"), JSON.stringify(metaVal, null, 2));
+
+                // 3. Launch temporary persistent context to "bake" the state into disk files (LevelDB/SQLite)
+                // This ensures that when the main bot launches, it finds a populated profile directory.
+                const { firefox } = require("playwright"); // Ensure we have playwright access
+                const browserExecutablePath = this.serverSystem.browserManager.browserExecutablePath;
+
+                // We use headless: true for this "baking" process
+                this.logger.info(`[VNC] Launching temporary persistent context to bake cache files...`);
+
+                // IMPORTANT: We pass storageState to populate the persistent buffer
+                const tempContext = await firefox.launchPersistentContext(cacheDir, {
+                    args: this.serverSystem.browserManager.launchArgs,
+                    executablePath: browserExecutablePath,
+                    headless: true,
+                    storageState: authData, // Pre-populate with VNC state
+                });
+
+                // Wait a moment for disk I/O
+                await new Promise(r => setTimeout(r, 2000));
+
+                await tempContext.close();
+                this.logger.info(`[VNC] 鉁?Persistent cache synced successfully for account #${nextAuthIndex}`);
+            } catch (cacheError) {
+                this.logger.error(`[VNC] 鉂?Failed to sync persistent cache: ${cacheError.message}`);
+                // Proceed without failing the main request, as auth-N.json is saved
+            }
+            // =========================================================================
+
             this.serverSystem.authSource.reloadAuthSources();
 
             res.json({

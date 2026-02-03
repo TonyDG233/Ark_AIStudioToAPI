@@ -72,6 +72,18 @@ class AuthSource {
             throw new Error(`Failed to delete auth file for account #${index}: ${error.message}`);
         }
 
+        // Also remove the persistent cache directory if it exists
+        const cacheDir = path.join(process.cwd(), "cache", `auth-${index}`);
+        if (fs.existsSync(cacheDir)) {
+            try {
+                fs.rmSync(cacheDir, { force: true, recursive: true });
+                this.logger.info(`[Auth] Removed persistent cache for account #${index}`);
+            } catch (error) {
+                // Log but don't fail the entire operation since the main auth file is gone
+                this.logger.warn(`[Auth] Failed to remove cache directory for account #${index}: ${error.message}`);
+            }
+        }
+
         return {
             remainingAccounts: this.availableIndices.length,
             removedIndex: index,

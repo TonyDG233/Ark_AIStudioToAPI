@@ -1,8 +1,8 @@
-/**
+﻿/**
  * File: src/core/BrowserManager.js
  * Description: Browser manager for launching and controlling headless Firefox instances with authentication contexts
  *
- * Author: Ellinav, iBenzene, bbbugg, 挈挈
+ * Author: Ellinav, iBenzene, bbbugg, 鎸堟寛
  */
 
 const fs = require("fs");
@@ -26,6 +26,10 @@ class BrowserManager {
         // -1 means no account is currently active (invalid/error state)
         this._currentAuthIndex = -1;
         this.scriptFileName = "build.js";
+        this.cacheRootDir = path.join(process.cwd(), "cache");
+        this.cacheMetaFileName = "meta.json";
+        this.cacheStateFileName = "storage-state.json";
+        this.currentContextOptions = null;
 
         // Flag to distinguish intentional close from unexpected disconnect
         // Used by ConnectionRegistry callback to skip unnecessary reconnect attempts
@@ -46,23 +50,64 @@ class BrowserManager {
             "browser.safebrowsing.enabled": false, // Disable safe browsing
             "browser.safebrowsing.malware.enabled": false, // Disable malware check
             "browser.safebrowsing.phishing.enabled": false, // Disable phishing check
-            "browser.search.update": false, // Disable search engine auto-update
-            "browser.shell.checkDefaultBrowser": false, // Skip default browser check
-            "browser.tabs.warnOnClose": false, // No warning on closing tabs
-            "datareporting.policy.dataSubmissionEnabled": false, // Disable data reporting
-            "dom.webnotifications.enabled": false, // Disable notifications
-            "extensions.update.enabled": false, // Disable extension auto-update
-            "general.smoothScroll": false, // Disable smooth scrolling
-            "gfx.webrender.all": false, // Disable WebRender (GPU-based renderer)
-            "layers.acceleration.disabled": true, // Disable GPU hardware acceleration
-            "media.autoplay.default": 5, // 5 = Block all autoplay
-            "media.volume_scale": "0.0", // Mute audio
-            "network.dns.disablePrefetch": true, // Disable DNS prefetching
-            "network.http.speculative-parallel-limit": 0, // Disable speculative connections
-            "network.prefetch-next": false, // Disable link prefetching
-            "permissions.default.geo": 0, // 0 = Always deny geolocation
-            "services.sync.enabled": false, // Disable Firefox Sync
-            "toolkit.cosmeticAnimations.enabled": false, // Disable UI animations
+            "browser.search.update": false,
+            // [Fix] Ensure session resume on crash
+            "browser.sessionstore.restore_on_demand": false,
+
+            // [Fix] Restore previous session
+            "browser.sessionstore.resume_from_crash": true,
+
+            // Disable search engine auto-update
+            "browser.shell.checkDefaultBrowser": false,
+
+            // No warning on closing tabs
+            "browser.startup.page": 3,
+
+            // Skip default browser check
+            "browser.tabs.warnOnClose": false,
+            // [Fix] Allow unlimited crash resumes
+            "datareporting.policy.dataSubmissionEnabled": false,
+
+            // Disable data reporting
+            "dom.webnotifications.enabled": false,
+
+            // Disable notifications
+            "extensions.update.enabled": false,
+
+            // Disable extension auto-update
+            "general.smoothScroll": false,
+
+            // Disable smooth scrolling
+            "gfx.webrender.all": false,
+
+            // Disable WebRender (GPU-based renderer)
+            "layers.acceleration.disabled": true,
+
+            // Disable GPU hardware acceleration
+            "media.autoplay.default": 5,
+
+            // 5 = Block all autoplay
+            "media.volume_scale": "0.0",
+
+            // Mute audio
+            "network.dns.disablePrefetch": true,
+
+            // Disable DNS prefetching
+            "network.http.speculative-parallel-limit": 0,
+
+            // Disable speculative connections
+            "network.prefetch-next": false,
+
+            // Disable link prefetching
+            "permissions.default.geo": 0,
+
+            // 0 = Always deny geolocation
+            "services.sync.enabled": false,
+
+            // Disable Firefox Sync
+            "toolkit.cosmeticAnimations.enabled": false,
+            // [Fix] Force load all tabs immediately so Playwright sees them
+            "toolkit.startup.max_resumed_crashes": -1, // Disable UI animations
             "toolkit.telemetry.archive.enabled": false, // Disable telemetry archive
             "toolkit.telemetry.enabled": false, // Disable telemetry
             "toolkit.telemetry.unified": false, // Disable unified telemetry
@@ -109,6 +154,7 @@ class BrowserManager {
 
         // Check availability of auto-update feature from config
         if (!this.config.enableAuthUpdate) {
+            await this._persistContextCache(authIndex);
             return;
         }
 
@@ -138,9 +184,128 @@ class BrowserManager {
             // Overwrite the file with merged data
             await fs.promises.writeFile(authFilePath, JSON.stringify(authData, null, 2));
 
-            this.logger.info(`[Auth Update] 💾 Successfully updated auth credentials for account #${authIndex}`);
+            this.logger.info(`[Auth Update] ✅ Successfully updated auth credentials for account #${authIndex}`);
         } catch (error) {
             this.logger.error(`[Auth Update] ❌ Failed to update auth file: ${error.message}`);
+        }
+
+        await this._persistContextCache(authIndex);
+    }
+
+    _getCacheRootDir() {
+        return this.cacheRootDir;
+    }
+
+    _getAccountCacheDir(authIndex) {
+        return path.join(this._getCacheRootDir(), `auth-${authIndex}`);
+    }
+
+    _getAccountCacheMetaPath(authIndex) {
+        return path.join(this._getAccountCacheDir(authIndex), this.cacheMetaFileName);
+    }
+
+    _getAccountCacheStatePath(authIndex) {
+        return path.join(this._getAccountCacheDir(authIndex), this.cacheStateFileName);
+    }
+
+    _readCacheMeta(authIndex) {
+        const metaPath = this._getAccountCacheMetaPath(authIndex);
+        if (!fs.existsSync(metaPath)) return null;
+        try {
+            const raw = fs.readFileSync(metaPath, "utf-8");
+            return JSON.parse(raw);
+        } catch (error) {
+            this.logger.warn(`[Cache] Failed to read cache metadata for account #${authIndex}: ${error.message}`);
+            return null;
+        }
+    }
+
+    _writeCacheMeta(authIndex, meta) {
+        const cacheDir = this._getAccountCacheDir(authIndex);
+        if (!fs.existsSync(cacheDir)) {
+            fs.mkdirSync(cacheDir, { recursive: true });
+        }
+        const metaPath = this._getAccountCacheMetaPath(authIndex);
+        fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+    }
+
+    _resolveContextOptions(authIndex) {
+        const cacheMeta = this._readCacheMeta(authIndex);
+        const cachedOptions = cacheMeta?.contextOptions || {};
+
+        let viewport = cachedOptions.viewport;
+        if (
+            !viewport ||
+            typeof viewport.width !== "number" ||
+            typeof viewport.height !== "number" ||
+            viewport.width <= 0 ||
+            viewport.height <= 0
+        ) {
+            const randomWidth = 1920 + Math.floor(Math.random() * 50);
+            const randomHeight = 1080 + Math.floor(Math.random() * 50);
+            viewport = { height: randomHeight, width: randomWidth };
+        }
+
+        const contextOptions = {
+            deviceScaleFactor:
+                typeof cachedOptions.deviceScaleFactor === "number" ? cachedOptions.deviceScaleFactor : 1,
+            viewport,
+        };
+
+        return { cacheMeta, contextOptions };
+    }
+
+    async _persistContextCache(authIndex) {
+        if (!this.context) return;
+
+        const cacheDir = this._getAccountCacheDir(authIndex);
+        if (!fs.existsSync(cacheDir)) {
+            fs.mkdirSync(cacheDir, { recursive: true });
+        }
+
+        try {
+            const storageStatePath = this._getAccountCacheStatePath(authIndex);
+            await this.context.storageState({
+                includeIndexedDB: true,
+                path: storageStatePath,
+            });
+
+            const existingMeta = this._readCacheMeta(authIndex);
+            const nowIso = new Date().toISOString();
+            const viewport = this.currentContextOptions?.viewport || this.page?.viewportSize();
+            const deviceScaleFactor =
+                typeof this.currentContextOptions?.deviceScaleFactor === "number"
+                    ? this.currentContextOptions.deviceScaleFactor
+                    : 1;
+
+            const contextOptions = {
+                deviceScaleFactor,
+                ...(viewport ? { viewport } : {}),
+            };
+
+            this._writeCacheMeta(authIndex, {
+                authIndex,
+                contextOptions,
+                createdAt: existingMeta?.createdAt || nowIso,
+                storageStatePath: path.basename(storageStatePath),
+                updatedAt: nowIso,
+                version: 1,
+            });
+
+            this.logger.info(`[Cache] ✅ Persisted cache snapshot for account #${authIndex}`);
+        } catch (error) {
+            this.logger.warn(`[Cache] Failed to persist cache snapshot for account #${authIndex}: ${error.message}`);
+        }
+    }
+
+    _clearAccountCache(authIndex) {
+        const cacheDir = this._getAccountCacheDir(authIndex);
+        if (!fs.existsSync(cacheDir)) return;
+        try {
+            fs.rmSync(cacheDir, { force: true, recursive: true });
+            this.logger.warn(`[Cache] Removed cache directory for account #${authIndex}`);
+        } catch (error) {
+            this.logger.warn(`[Cache] Failed to remove cache directory for account #${authIndex}: ${error.message}`);
         }
     }
 
@@ -150,7 +315,7 @@ class BrowserManager {
      */
     notifyUserActivity() {
         if (this.noButtonCount > 0) {
-            this.logger.info("[Browser] ⚡ User activity detected, forcing Launch detection wakeup...");
+            this.logger.info("[Browser] ⚡User activity detected, forcing Launch detection wakeup...");
             this.noButtonCount = 0;
         }
     }
@@ -401,72 +566,72 @@ class BrowserManager {
         });
         /* eslint-enable no-undef */
 
+        // Step 1: Open Code Editor
         this.logger.info(`${logPrefix} (Step 1/5) Preparing to click "Code" button...`);
         const maxTimes = 15;
         for (let i = 1; i <= maxTimes; i++) {
             try {
                 this.logger.info(`  [Attempt ${i}/${maxTimes}] Cleaning overlay layers and clicking...`);
-                /* eslint-disable no-undef */
-                await this.page.evaluate(() => {
-                    document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
-                });
-                /* eslint-enable no-undef */
+                await this.page.evaluate(() =>
+                    // eslint-disable-next-line no-undef
+                    document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove())
+                );
                 await this.page.waitForTimeout(500);
 
-                // Use Smart Click instead of hardcoded locator
                 await this._smartClickCode(this.page);
-
                 this.logger.info("  ✅ Click successful!");
                 break;
             } catch (error) {
                 this.logger.warn(`  [Attempt ${i}/${maxTimes}] Click failed: ${error.message.split("\n")[0]}`);
-                if (i === maxTimes) {
-                    throw new Error(`Unable to click "Code" button after multiple attempts, initialization failed.`);
-                }
+                if (i === maxTimes) throw new Error(`Unable to click "Code" button after multiple attempts.`);
             }
         }
 
-        this.logger.info(
-            `${logPrefix} (Step 2/5) "Code" button clicked successfully, waiting for editor to become visible...`
-        );
+        this.logger.info(`${logPrefix} (Step 2/5) Waiting for editor to become visible...`);
         const editorContainerLocator = this.page.locator("div.monaco-editor").first();
-        await editorContainerLocator.waitFor({
-            state: "visible",
-            timeout: 60000,
-        });
+        await editorContainerLocator.waitFor({ state: "visible", timeout: 60000 });
 
-        this.logger.info(
-            `${logPrefix} (Cleanup #2) Preparing to click editor, forcefully removing all possible overlay layers again...`
-        );
-        /* eslint-disable no-undef */
-        await this.page.evaluate(() => {
-            const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
-            if (overlays.length > 0) {
-                console.log(
-                    `[ProxyClient] (Internal JS) Found and removed ${overlays.length} newly appeared overlay layers.`
-                );
-                overlays.forEach(el => el.remove());
-            }
-        });
-        /* eslint-enable no-undef */
-        await this.page.waitForTimeout(250);
-
+        // Step 2: Paste Script
+        // This act of pasting serves as the "Edit" that triggers the Save button visibility
         this.logger.info(`${logPrefix} (Step 3/5) Editor displayed, focusing and pasting script...`);
         await editorContainerLocator.click({ timeout: 30000 });
 
-        /* eslint-disable no-undef */
+        // eslint-disable-next-line no-undef
         await this.page.evaluate(text => navigator.clipboard.writeText(text), buildScriptContent);
-        /* eslint-enable no-undef */
         const isMac = os.platform() === "darwin";
         const pasteKey = isMac ? "Meta+V" : "Control+V";
         await this.page.keyboard.press(pasteKey);
         this.logger.info(`${logPrefix} (Step 4/5) Script pasted.`);
+
+        // Step 3: Auto-Save (Conditional)
+        const currentUrl = this.page.url();
+        const shouldSave = !currentUrl.includes("/drive/");
+
+        if (shouldSave) {
+            this.logger.info(
+                `${logPrefix} 💾 Current workspace is temporary. Initiating Auto-Save sequence (triggered by script paste)...`
+            );
+            // We pass 'false' to skip the dummy edit, since we just pasted the real content
+            await this._performAppSaveSequence(logPrefix, false);
+
+            this.logger.info(`${logPrefix} 🔄 Save completed (URL changed). Waiting for environment stabilization...`);
+            // After URL change/reload, we generally expect the editor to still contain our script (loaded from server)
+            // But we should ensure the UI is ready for the Preview click
+            await this.page.waitForTimeout(3000);
+        }
+
+        // Step 4: Click Preview
         this.logger.info(`${logPrefix} (Step 5/5) Clicking "Preview" button to activate script...`);
+        // We might need to handle overlays again if page reloaded
+        await this.page.evaluate(() =>
+            // eslint-disable-next-line no-undef
+            document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove())
+        );
+
         await this.page.locator('button:text("Preview")').click();
         this.logger.info(`${logPrefix} ✅ UI interaction complete, script is now running.`);
 
-        // Active Trigger (Hack to wake up Google Backend)
-        this.logger.info(`${logPrefix} ⚡ Sending active trigger request to Launch flow...`);
+        // Active Trigger
         try {
             await this.page.evaluate(async () => {
                 try {
@@ -486,19 +651,253 @@ class BrowserManager {
     }
 
     /**
+     * Feature: Automate "Save App" Sequence
+     * Renovated based on user request to persist the workspace.
+     */
+    async _performAppSaveSequence(logPrefix, triggerEdit = true) {
+        try {
+            this.logger.info(`${logPrefix} [AutoSave] Looking for "Save" button...`);
+
+            if (triggerEdit) {
+                // [Fix] Trigger "Unsaved" state by switching to Code view and making a small edit
+                try {
+                    this.logger.info(`${logPrefix} [AutoSave] Switching to Code view to trigger edit state...`);
+                    await this._smartClickCode(this.page);
+
+                    // Wait for editor to be ready
+                    const editorLocator = this.page.locator("div.monaco-editor").first();
+                    await editorLocator.waitFor({ state: "visible", timeout: 10000 });
+                    await editorLocator.click();
+
+                    this.logger.info(`${logPrefix} [AutoSave] Typing initialization comment...`);
+                    await this.page.keyboard.type("// Init Save");
+                    await this.page.waitForTimeout(2000); // Wait for Save button to appear
+                } catch (e) {
+                    this.logger.warn(`${logPrefix} [AutoSave] Failed to trigger code edit: ${e.message}.`);
+                }
+            } else {
+                this.logger.info(
+                    `${logPrefix} [AutoSave] Skipping explicit edit trigger (content already assumed pasted).`
+                );
+            }
+
+            // Increased wait time to 5s based on debug findings
+            await this.page.waitForTimeout(3000);
+
+            // Selectors confirmed by debugging
+            const saveButtonSelectors = [
+                'button[aria-label="Save app"]', // Priority 1: Confirmed working
+                'button[aria-label="Save"]', // Fallback
+                'button:has(mat-icon:text("save"))',
+                'button:has(span:text("save"))',
+                'span.material-symbols-outlined:text("save")',
+                'span:text-is("save")',
+            ];
+
+            let saveBtn = null;
+
+            // Attempt 1: Normal View
+            for (const sel of saveButtonSelectors) {
+                try {
+                    const el = this.page.locator(sel).first();
+                    if ((await el.count()) > 0 && (await el.isVisible())) {
+                        saveBtn = el;
+                        this.logger.info(
+                            `${logPrefix} [AutoSave] ✅ Found Save button (Attempt 1 - Normal) with selector: ${sel}`
+                        );
+                        break;
+                    }
+                } catch (e) {
+                    /* ignore */
+                }
+            }
+
+            // Attempt 2: Zoom out & Scroll (Fallback for small screens/off-screen)
+            if (!saveBtn) {
+                this.logger.info(
+                    `${logPrefix} [AutoSave] Button not found in normal view. Attempting zoom & scroll adjustment...`
+                );
+                await this.page.evaluate(() => {
+                    // eslint-disable-next-line no-undef
+                    document.body.style.zoom = "0.8"; // Zoom out to 80%
+                    // eslint-disable-next-line no-undef
+                    window.scrollTo(document.body.scrollWidth, 0); // Scroll to top-right
+                });
+                await this.page.waitForTimeout(1000);
+
+                for (const sel of saveButtonSelectors) {
+                    try {
+                        const el = this.page.locator(sel).first();
+                        if ((await el.count()) > 0 && (await el.isVisible())) {
+                            saveBtn = el;
+                            this.logger.info(
+                                `${logPrefix} [AutoSave] ✅ Found Save button (Attempt 2 - Zoomed) with selector: ${sel}`
+                            );
+                            break;
+                        }
+                    } catch (e) {
+                        /* ignore */
+                    }
+                }
+            }
+
+            if (!saveBtn) {
+                this.logger.warn(`${logPrefix} [AutoSave] ❌ Could not find Save button after all attempts.`);
+
+                // [Diagnostic] Dump all visible buttons to logs to analyze why we missed it
+                try {
+                    const pageUrl = this.page.url();
+                    const pageTitle = await this.page.title();
+                    this.logger.info(`${logPrefix} [Debug] Page URL: ${pageUrl}, Title: ${pageTitle}`);
+
+                    const buttons = await this.page.evaluate(
+                        () =>
+                            Array.from(
+                                // eslint-disable-next-line no-undef
+                                document.querySelectorAll('button, span[role="button"], div[role="button"], mat-icon')
+                            )
+                                .map(b => {
+                                    const text = b.innerText?.trim().substring(0, 30) || ""; // Truncate
+                                    const label = b.getAttribute("aria-label") || "";
+                                    const visible = b.offsetWidth > 0 && b.offsetHeight > 0;
+                                    if (!visible) return null;
+                                    return `[${b.tagName}] Text:"${text}" Label:"${label}"`;
+                                })
+                                .filter(Boolean)
+                                .slice(0, 50) // Limit output
+                    );
+                    this.logger.info(`${logPrefix} [Debug] Visible elements candidates:\n${buttons.join("\n")}`);
+                } catch (e) {
+                    this.logger.warn(`${logPrefix} [Debug] Failed to dump elements: ${e.message}`);
+                }
+
+                return; // Stop execution if button not found
+            } else {
+                await saveBtn.click();
+            }
+
+            this.logger.info(`${logPrefix} [AutoSave] Clicked Save button. Waiting for dialog...`);
+
+            // Wait for "Rename app" dialog
+            // Based on user screenshot: Title "Rename app", Inputs "Name", "Description"
+            await this.page.waitForSelector('mat-dialog-container, .interaction-modal, h3:text("Rename app")', {
+                timeout: 10000,
+            });
+
+            this.logger.info(`${logPrefix} [AutoSave] Dialog appeared. Filling details...`);
+
+            // Fill Name
+            // Assumption: First input is Name, Second (or textarea) is Description
+            const nameInput = this.page.locator('input[type="text"]').first();
+            await nameInput.fill("AIStudioToAPI");
+
+            // Fill Description
+            const descriptionInput = this.page.locator("textarea").first();
+            if (await descriptionInput.isVisible()) {
+                await descriptionInput.fill("https://github.com/iBUHub/AIStudioToAPI");
+            } else {
+                // Fallback if description is an input
+                const inputs = await this.page.locator('input[type="text"]').all();
+                if (inputs.length > 1) {
+                    await inputs[1].fill("https://github.com/iBUHub/AIStudioToAPI");
+                }
+            }
+
+            // Click Save in Dialog
+            // Look for a button with text "Save" inside the dialog
+            const confirmSaveBtn = this.page
+                .locator('mat-dialog-container button:text("Save"), .interaction-modal button:text("Save")')
+                .first();
+            await confirmSaveBtn.click();
+
+            this.logger.info(`${logPrefix} [AutoSave] Confirmed Save. Waiting for redirect (Polling URL change)...`);
+
+            // Wait for URL to change (contain "drive")
+            // [Fix] Increased timeout to 30s to handle slow network/transitions
+            // waitForURL internally polls navigation events, which is efficient and accurate.
+            await this.page.waitForURL(/.*\/drive\/.*/, { timeout: 30000 });
+
+            const newUrl = this.page.url();
+            this.logger.info(`${logPrefix} ✅ [AutoSave] App saved successfully! New URL: ${newUrl}`);
+
+            // [Feature] Cache the new App ID locally
+            try {
+                const match = newUrl.match(/\/drive\/([^?&]+)/);
+                if (match && match[1]) {
+                    const newAppId = match[1];
+                    const cachePath = this._getLastAppIdPath(this.currentAuthIndex);
+                    // Ensure dir exists
+                    const dir = path.dirname(cachePath);
+                    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+                    fs.writeFileSync(cachePath, newAppId, "utf-8");
+                    this.logger.info(`${logPrefix} [Cache] Saved App ID [${newAppId}] to local cache.`);
+                }
+            } catch (err) {
+                this.logger.warn(`${logPrefix} [Cache] Failed to save App ID to cache: ${err.message}`);
+            }
+        } catch (error) {
+            this.logger.warn(`${logPrefix} [AutoSave] Failed: ${error.message}. Continuing...`);
+        }
+    }
+
+    /**
      * Helper: Navigate to target page and wake up the page
      * Contains the common navigation and page activation logic
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
      */
     async _navigateAndWakeUpPage(logPrefix = "[Browser]") {
-        this.logger.info(`${logPrefix} Navigating to target page...`);
+        this.logger.info(`${logPrefix} Preparing navigation...`);
+
+        const currentUrl = this.page.url();
+        // [Feature] Native Session Restoration Check
+        // If the browser restored a valid session (e.g., specific App URL), we should respect it.
+        if (
+            currentUrl.includes("/drive/") ||
+            (currentUrl.includes("aistudio.google.com") && !currentUrl.includes("about:blank"))
+        ) {
+            this.logger.info(
+                `${logPrefix} 📂 Native session restored! Already on valid URL: ${currentUrl}. Skipping forced navigation.`
+            );
+            return;
+        }
+
+        // [Feature] Prioritize Local Cache for Resume
         const targetUrl =
             "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showCode=true&showAssistant=true";
+        const usedCache = false;
+
+        // Reverted TXT cache logic as per user request
+
+        this.logger.info(`${logPrefix} Navigating to: ${targetUrl}`);
         await this.page.goto(targetUrl, {
             timeout: 180000,
             waitUntil: "domcontentloaded",
         });
         this.logger.info(`${logPrefix} Page loaded.`);
+
+        // [Feature] Smart App Resume (Only if not using cache)
+        if (!usedCache) {
+            try {
+                const existingAppId = await this._findExistingAppId(logPrefix);
+                if (existingAppId) {
+                    this.logger.info(
+                        `${logPrefix} ♻️ Found existing "AIStudioToAPI" app (RPC check) (ID: ${existingAppId}). Resuming...`
+                    );
+                    const resumeUrl = `https://aistudio.google.com/u/0/apps/drive/${existingAppId}?showPreview=true&showCode=true&showAssistant=true`;
+                    await this.page.goto(resumeUrl, {
+                        timeout: 60000,
+                        waitUntil: "domcontentloaded",
+                    });
+                    this.logger.info(`${logPrefix} ✅ Resumed existing app.`);
+                } else {
+                    this.logger.info(`${logPrefix} 🆕 No existing app found via RPC. Staying in blank workspace.`);
+                    // Do NOT navigate to Dashboard. Just stay here.
+                }
+            } catch (error) {
+                this.logger.warn(`${logPrefix} ⚠️ Smart Resume check failed: ${error.message}. Staying on blank page.`);
+            }
+        }
 
         // Wake up window using JS and Human Movement
         try {
@@ -526,6 +925,123 @@ class BrowserManager {
     }
 
     /**
+     * Feature: Find existing "AIStudioToAPI" app ID
+     * Fetches user's recent file list via Google RPC (ListRecentApplets) using user-provided structure.
+     */
+    async _findExistingAppId(logPrefix) {
+        this.logger.info(`${logPrefix} 🔍 Checking for existing apps (RPC: ListDriveApplets)...`);
+
+        try {
+            // 1. Get SAPISID from cookies (Node-side)
+            const cookies = await this.context.cookies("https://aistudio.google.com");
+            const sapisidCookie = cookies.find(c => c.name === "SAPISID");
+
+            let authHeader = "";
+            let sapisid = "";
+
+            if (sapisidCookie) {
+                sapisid = sapisidCookie.value;
+                const now = Math.floor(Date.now() / 1000);
+                const origin = "https://aistudio.google.com"; // Standard origin
+                const payload = now + " " + sapisid + " " + origin;
+
+                const crypto = require("crypto");
+                const sha1 = crypto.createHash("sha1").update(payload).digest("hex");
+
+                authHeader = `SAPISIDHASH ${now}_${sha1}`;
+                this.logger.info(
+                    `${logPrefix} [RPC] SAPISID found (masked: ${sapisid.substring(0, 5)}...), generated hash in Node: ${authHeader}`
+                );
+            } else {
+                this.logger.warn(`${logPrefix} [RPC] ⚠️ No SAPISID cookie found! Auth header will be empty.`);
+            }
+
+            // 2. Execute Fetch in Browser
+            return await this.page.evaluate(
+                async ({ authHeader }) => {
+                    try {
+                        // Force Auth User to 0
+                        const authUser = "0";
+
+                        const response = await fetch(
+                            "https://alkalimakersuite-pa.clients6.google.com/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/ListDriveApplets",
+                            {
+                                body: "[1000]",
+                                credentials: "include",
+                                headers: {
+                                    Authorization: authHeader,
+                                    "Content-Type": "application/json+protobuf",
+                                    "x-goog-api-key": "AIzaSyDdP816MREB3SkjZO04QXbjsigfcI0GWOs",
+                                    "X-Goog-AuthUser": authUser,
+                                    "x-goog-ext-519733851-bin": "CAESAUwwATgEQAA=",
+                                    "x-user-agent": "grpc-web-javascript/0.1",
+                                },
+                                method: "POST",
+                            }
+                        );
+
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            console.warn(
+                                `[ProxyClient] RPC Failed: ${response.status} ${response.statusText}`,
+                                errorText
+                            );
+                            return null;
+                        }
+
+                        const json = await response.json();
+                        // console.log("[ProxyClient] RPC Response:", json); // Verbose
+
+                        const items = json?.[0]?.[0];
+                        if (!Array.isArray(items)) {
+                            console.warn("[ProxyClient] RPC response items is not an array:", json);
+                            return null;
+                        }
+
+                        for (const item of items) {
+                            if (!Array.isArray(item)) continue;
+
+                            // Debug: Identify what we ARE seeing
+                            const possibleNames = item.filter(f => typeof f === "string");
+                            console.log(
+                                `[ProxyClient] Scanning App Item. Found strings: [${possibleNames.join(", ")}]`
+                            );
+
+                            // Search for name
+                            const nameIndex = item.findIndex(
+                                f => typeof f === "string" && (f === "AIStudioToAPI" || f.includes("AIStudioToAPI"))
+                            );
+
+                            if (nameIndex !== -1) {
+                                // Try standard path for ID
+                                try {
+                                    const id = item[2]?.[2]?.[0];
+                                    if (typeof id === "string" && id.length > 10) return id;
+                                } catch (e) {
+                                    /* empty */
+                                }
+
+                                // Fallback string match
+                                const potentialId = JSON.stringify(item).match(/"(1[a-zA-Z0-9_-]{20,})"/);
+                                if (potentialId) return potentialId[1];
+                            }
+                        }
+                        console.log("[ProxyClient] No matching app found in list.");
+                        return null;
+                    } catch (e) {
+                        console.warn("[ProxyClient] Error in _findExistingAppId:", e.message);
+                        return null;
+                    }
+                },
+                { authHeader }
+            );
+        } catch (e) {
+            this.logger.warn(`${logPrefix} [RPC] Critical error in Node logic: ${e.message}`);
+            return null;
+        }
+    }
+
+    /**
      * Helper: Check page status and detect various error conditions
      * Detects: cookie expiration, region restrictions, 403 errors, page load failures
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
@@ -548,7 +1064,7 @@ class BrowserManager {
             currentUrl.includes("accounts.google.com") ||
             currentUrl.includes("ServiceLogin") ||
             pageTitle.includes("Sign in") ||
-            pageTitle.includes("登录")
+            pageTitle.includes("鐧诲綍")
         ) {
             throw new Error(
                 "🚨 Cookie expired/invalid! Browser was redirected to Google login page. Please re-extract storageState."
@@ -676,7 +1192,7 @@ class BrowserManager {
         // Clear existing interval if any
         if (this.healthMonitorInterval) clearInterval(this.healthMonitorInterval);
 
-        this.logger.info("[Browser] 🛡️ Background health monitor service (Scavenger) started...");
+        this.logger.info("[Browser] 🧹 Background health monitor service (Scavenger) started...");
 
         let tickCount = 0;
 
@@ -725,7 +1241,7 @@ class BrowserManager {
                 if (tickCount % 21600 === 0) {
                     if (this._currentAuthIndex >= 0) {
                         try {
-                            this.logger.info("[HealthMonitor] 💾 Triggering daily periodic auth file update...");
+                            this.logger.info("[HealthMonitor] ✅ Triggering daily periodic auth file update...");
                             await this._updateAuthFile(this._currentAuthIndex);
                         } catch (e) {
                             this.logger.warn(`[HealthMonitor] Auth update failed: ${e.message}`);
@@ -752,7 +1268,7 @@ class BrowserManager {
                     // Click active buttons if visible
                     // eslint-disable-next-line no-undef
                     document.querySelectorAll("button").forEach(btn => {
-                        // 检查元素是否占据空间（简单的可见性检查）
+                        // 妫€鏌ュ厓绱犳槸鍚﹀崰鎹┖闂达紙绠€鍗曠殑鍙鎬ф鏌ワ級
                         const rect = btn.getBoundingClientRect();
                         const isVisible = rect.width > 0 && rect.height > 0;
 
@@ -760,7 +1276,7 @@ class BrowserManager {
                             const text = (btn.innerText || "").trim();
                             const ariaLabel = btn.getAttribute("aria-label");
 
-                            // 匹配文本 或 aria-label
+                            // 鍖归厤鏂囨湰 鎴?aria-label
                             if (targetTexts.includes(text) || ariaLabel === "Close") {
                                 console.log(`[ProxyClient] HealthMonitor clicking: ${text || "Close Button"}`);
                                 btn.click();
@@ -808,7 +1324,7 @@ class BrowserManager {
 
         if (!currentPage || currentPage.isClosed() || this.page !== currentPage) return;
 
-        this.logger.info("[Browser] 🛡️ Background Wakeup Service (Rocket Handler) started...");
+        this.logger.info("[Browser] 🧹 Background Wakeup Service (Rocket Handler) started...");
 
         while (currentPage && !currentPage.isClosed() && this.page === currentPage) {
             try {
@@ -976,7 +1492,7 @@ class BrowserManager {
         });
 
         vncBrowser.on("disconnected", () => {
-            this.logger.warn("ℹ️ [VNC] The temporary VNC browser instance has been disconnected.");
+            this.logger.warn("⚠️ [VNC] The temporary VNC browser instance has been disconnected.");
         });
 
         this.logger.info("✅ [VNC] Temporary VNC browser instance launched successfully.");
@@ -999,6 +1515,119 @@ class BrowserManager {
         return { browser: vncBrowser, context };
     }
 
+    async _launchPersistentContextForAccount(authIndex, contextOptions, storageStateObject, useCache) {
+        if (!fs.existsSync(this.browserExecutablePath)) {
+            this._currentAuthIndex = -1;
+            throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
+        }
+
+        const cacheDir = this._getAccountCacheDir(authIndex);
+        if (!fs.existsSync(cacheDir)) {
+            fs.mkdirSync(cacheDir, { recursive: true });
+        }
+
+        const launchOptions = {
+            args: this.launchArgs,
+            executablePath: this.browserExecutablePath,
+            firefoxUserPrefs: this.firefoxUserPrefs,
+            headless: false, // Main browser is always headless
+            ...contextOptions,
+        };
+
+        if (!useCache && storageStateObject) {
+            launchOptions.storageState = storageStateObject;
+        }
+
+        this.context = await firefox.launchPersistentContext(cacheDir, launchOptions);
+        this.browser = this.context.browser();
+
+        let pages = this.context.pages();
+        this.logger.info(
+            `[Browser] Initial pages check: ${pages.length} pages found. URLs: ${pages.map(p => p.url()).join(", ")}`
+        );
+
+        // [Fix] Wait for SESSION RESTORE to complete.
+        // Firefox opens 'about:blank' immediately, so existing check (pages.length === 0) was exiting too early.
+        // We now wait until we see a NON-BLANK page or timeout.
+        let usefulPageFound = false;
+        for (let i = 0; i < 50; i++) {
+            pages = this.context.pages();
+            if (pages.some(p => !p.url().includes("about:blank"))) {
+                // eslint-disable-next-line no-unused-vars
+                usefulPageFound = true;
+                break;
+            }
+            await new Promise(r => setTimeout(r, 200));
+        }
+
+        this.logger.info(`[Browser] Post-wait pages check: ${pages.length} pages found.`);
+        if (pages.length > 0) {
+            // [Fix] Prioritize non-blank pages
+            const usefulPage = pages.find(p => !p.url().includes("about:blank")) || pages[0];
+            this.page = usefulPage;
+
+            const restoredUrl = this.page.url();
+            this.logger.info(`[Browser] ♻️ Claimed page. URL: ${restoredUrl} (Total tabs: ${pages.length})`);
+
+            if (pages.length > 1 || (pages.length === 1 && !restoredUrl.includes("about:blank"))) {
+                this.logger.info(`[Browser] ✅ Successfully latched onto restored session tab.`);
+            } else {
+                this.logger.info(`[Browser] ⚠️ Only about:blank found. Session restore might be slow or empty.`);
+            }
+
+            if (pages.length > 1) {
+                const urls = pages.map(p => p.url()).join(", ");
+                this.logger.info(`[Browser] All open tabs: [${urls}]`);
+            }
+        } else {
+            this.logger.info(`[Browser] No pages found, creating new page.`);
+            this.page = await this.context.newPage();
+        }
+
+        this.currentContextOptions = contextOptions;
+
+        // [Fix] Manually seed storage state if it was ignored or if this is a fresh cache.
+        // Playwright's launchPersistentContext sometimes ignores storageState in launchOptions
+        // or fails to persist it immediately to the fresh profile.
+        if (!useCache && storageStateObject) {
+            this.logger.info(
+                "[Browser] ⚡ Manually seeding connection state (Cookies/Origins) into fresh persistent context..."
+            );
+            try {
+                if (storageStateObject.cookies) {
+                    await this.context.addCookies(storageStateObject.cookies);
+                }
+                if (storageStateObject.origins) {
+                    await this.context.addInitScript(() => {
+                        // eslint-disable-next-line no-undef
+                        if (window.location.hostname === "about:blank") return; // Init script runs before navigation
+                        // We can't easily inject local storage here without a page,
+                        // but Playwright's storageState usually handles cookies well.
+                        // Let's rely on cookies first, as they are the primary auth mechanism.
+                    }, storageStateObject);
+                }
+                this.logger.info("[Browser] ✅ Manual seeding complete.");
+            } catch (err) {
+                this.logger.warn(`[Browser] Manual seeding warning: ${err.message}`);
+            }
+        }
+
+        this.browser.on("disconnected", () => {
+            if (this.isClosingIntentionally) {
+                this.logger.info("[Browser] Main browser disconnected (intentional).");
+            } else {
+                this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
+                this.logger.warn("[Browser] Reset currentAuthIndex to -1 due to unexpected disconnect.");
+            }
+
+            this.browser = null;
+            this.context = null;
+            this.page = null;
+            this.currentContextOptions = null;
+            this._currentAuthIndex = -1;
+        });
+    }
+
     async launchOrSwitchContext(authIndex) {
         if (typeof authIndex !== "number" || authIndex < 0) {
             this.logger.error(`[Browser] Invalid authIndex: ${authIndex}. authIndex must be >= 0.`);
@@ -1015,74 +1644,54 @@ class BrowserManager {
             }
         }
 
-        if (!this.browser) {
-            this.logger.info("🚀 [Browser] Main browser instance not running, performing first-time launch...");
-            if (!fs.existsSync(this.browserExecutablePath)) {
-                this._currentAuthIndex = -1;
-                throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
-            }
-            this.browser = await firefox.launch({
-                args: this.launchArgs,
-                executablePath: this.browserExecutablePath,
-                firefoxUserPrefs: this.firefoxUserPrefs,
-                headless: true, // Main browser is always headless
-            });
-            this.browser.on("disconnected", () => {
-                this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
-                this.browser = null;
-                this.context = null;
-                this.page = null;
-                this._currentAuthIndex = -1;
-                this.logger.warn("[Browser] Reset currentAuthIndex to -1 due to unexpected disconnect.");
-            });
-            this.logger.info("✅ [Browser] Main browser instance successfully launched.");
-        }
-
         if (this.healthMonitorInterval) {
             clearInterval(this.healthMonitorInterval);
             this.healthMonitorInterval = null;
             this.logger.info("[Browser] Stopped background tasks (Scavenger) for old page.");
         }
 
-        if (this.context) {
+        if (this.browser || this.context) {
             this.logger.info("[Browser] Closing old API browser context...");
-            const closePromise = this.context.close();
-            const timeoutPromise = new Promise(r => setTimeout(r, 5000)); // 5秒超时
-            await Promise.race([closePromise, timeoutPromise]);
-            this.context = null;
-            this.page = null;
-            this.logger.info("[Browser] Old API context closed.");
+            await this.closeBrowser();
         }
-
-        const sourceDescription = `File auth-${authIndex}.json`;
-        this.logger.info("==================================================");
-        this.logger.info(`🔄 [Browser] Creating new API browser context for account #${authIndex}`);
-        this.logger.info(`   • Auth source: ${sourceDescription}`);
-        this.logger.info("==================================================");
 
         const storageStateObject = this.authSource.getAuth(authIndex);
         if (!storageStateObject) {
             throw new Error(`Failed to get or parse auth source for index ${authIndex}.`);
         }
 
+        const { cacheMeta, contextOptions } = this._resolveContextOptions(authIndex);
+        const hasCache = !!cacheMeta;
+
         const buildScriptContent = this._loadAndConfigureBuildScript();
 
-        try {
-            // Viewport Randomization
-            const randomWidth = 1920 + Math.floor(Math.random() * 50);
-            const randomHeight = 1080 + Math.floor(Math.random() * 50);
+        const attemptInit = async ({ useCache, clearCache }) => {
+            if (clearCache) {
+                this._clearAccountCache(authIndex);
+            }
 
-            this.context = await this.browser.newContext({
-                deviceScaleFactor: 1,
-                storageState: storageStateObject,
-                viewport: { height: randomHeight, width: randomWidth },
-            });
+            const sourceDescription = useCache ? `Cache auth-${authIndex}` : `File auth-${authIndex}.json`;
+            this.logger.info("==================================================");
+            this.logger.info(`🔄 [Browser] Creating new API browser context for account #${authIndex}`);
+            this.logger.info(`   • Auth source: ${sourceDescription}`);
+            this.logger.info("==================================================");
+
+            if (useCache) {
+                this.logger.info(`[Cache] Using cached profile for account #${authIndex}.`);
+            } else {
+                this.logger.info(`[Cache] Seeding profile from auth file for account #${authIndex}.`);
+            }
+
+            await this._launchPersistentContextForAccount(authIndex, contextOptions, storageStateObject, useCache);
 
             // Inject Privacy Script immediately after context creation
             const privacyScript = this._getPrivacyProtectionScript(authIndex);
             await this.context.addInitScript(privacyScript);
 
-            this.page = await this.context.newPage();
+            // [Fix] Do NOT open a new page if one was already captured/restored by _launchPersistentContextForAccount
+            if (!this.page || this.page.isClosed()) {
+                this.page = await this.context.newPage();
+            }
 
             // Pure JS Wakeup (Focus & Click)
             try {
@@ -1137,16 +1746,37 @@ class BrowserManager {
             this.logger.info(`✅ [Browser] Account ${authIndex} context initialized successfully!`);
             this.logger.info("✅ [Browser] Browser client is ready.");
             this.logger.info("==================================================");
+        };
+
+        try {
+            await attemptInit({ clearCache: false, useCache: hasCache });
         } catch (error) {
+            if (hasCache) {
+                this.logger.warn(
+                    `[Cache] Cache init failed for account #${authIndex}: ${error.message}. Falling back to auth file.`
+                );
+                await this.closeBrowser();
+                try {
+                    await attemptInit({ clearCache: true, useCache: false });
+                    return;
+                } catch (fallbackError) {
+                    this.logger.error(
+                        `❌ [Browser] Account ${authIndex} context initialization failed: ${fallbackError.message}`
+                    );
+                    await this._saveDebugArtifacts("init_failed");
+                    await this.closeBrowser();
+                    this._currentAuthIndex = -1;
+                    throw fallbackError;
+                }
+            }
+
             this.logger.error(`❌ [Browser] Account ${authIndex} context initialization failed: ${error.message}`);
             await this._saveDebugArtifacts("init_failed");
             await this.closeBrowser();
             this._currentAuthIndex = -1;
             throw error;
         }
-    }
-
-    /**
+    } /**
      * Lightweight Reconnect: Refreshes the page and re-injects the script
      * without restarting the entire browser instance.
      *

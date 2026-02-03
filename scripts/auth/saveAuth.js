@@ -80,6 +80,12 @@ const getNextAuthIndex = () => {
     const newIndex = getNextAuthIndex();
     const authFileName = `auth-${newIndex}.json`;
 
+    // Persistent Cache Directory
+    const cacheRootDir = path.join(projectRoot, "cache");
+    const accountCacheDir = path.join(cacheRootDir, `auth-${newIndex}`);
+    ensureDirectoryExists(cacheRootDir);
+    ensureDirectoryExists(accountCacheDir);
+
     console.log(
         getText(
             `▶️  正在准备为账号 #${newIndex} 创建新的认证文件...`,
@@ -87,6 +93,7 @@ const getNextAuthIndex = () => {
         )
     );
     console.log(getText(`▶️  启动浏览器: ${browserExecutablePath}`, `▶️  Launching browser: ${browserExecutablePath}`));
+    console.log(getText(`▶️  持久化缓存目录: ${accountCacheDir}`, `▶️  Persistent cache dir: ${accountCacheDir}`));
 
     if (!browserExecutablePath || !fs.existsSync(browserExecutablePath)) {
         console.error(getText("❌ 未找到 Camoufox 可执行文件。", "❌ Camoufox executable not found."));
@@ -105,13 +112,16 @@ const getNextAuthIndex = () => {
         process.exit(1);
     }
 
-    const browser = await firefox.launch({
+    // Launch Persistent Context
+    // We use a persistent context so the browser fingerprint and local storage are saved directly to disk.
+    const context = await firefox.launchPersistentContext(accountCacheDir, {
         executablePath: browserExecutablePath,
         headless: false,
+        viewport: null, // Let browser decide or user resize
     });
 
-    const context = await browser.newContext();
-    const page = await context.newPage();
+    // In persistent context, pages[0] is usually opened by default
+    const page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
 
     console.log("");
     console.log(
@@ -208,6 +218,8 @@ const getNextAuthIndex = () => {
     // ==================== Smart Validation and Dual-file Save Logic ====================
     console.log("");
     console.log(getText("正在获取并验证登录状态...", "Retrieving and validating login status..."));
+
+    // We still take a snapshot of cookies/origins for auth-N.json backward compatibility
     const currentState = await context.storageState();
     currentState.accountName = accountName;
     const prettyStateString = JSON.stringify(currentState, null, 2);
@@ -221,14 +233,47 @@ const getNextAuthIndex = () => {
             )
         );
 
+        // 1. Save auth-N.json (Legacy / Fallback support)
         const compactStateString = JSON.stringify(currentState);
         const authFilePath = path.join(configDirPath, authFileName);
-
         fs.writeFileSync(authFilePath, compactStateString);
         console.log(
             getText(
-                `   📄 认证文件已保存到: ${path.join(CONFIG_DIR, authFileName)}`,
-                `   📄 Authentication file saved to: ${path.join(CONFIG_DIR, authFileName)}`
+                `   📄 认证文件已保存到: ${path.join(CONFIG_DIR, authFileName)} (Fallback)`,
+                `   📄 Authentication file saved to: ${path.join(CONFIG_DIR, authFileName)} (Fallback)`
+            )
+        );
+
+        // 2. Save Cache Metadata (meta.json)
+        // BrowserManager expects: authIndex, contextOptions, storageStatePath, etc.
+        const metaPath = path.join(accountCacheDir, "meta.json");
+        const statePathWithinCache = "storage-state.json";
+        const absStatePath = path.join(accountCacheDir, statePathWithinCache);
+
+        // Save a copy of storageState inside the cache dir too, referenced by meta
+        // (This makes the cache directory self-contained for BrowserManager.js: _resolveContextOptions)
+        fs.writeFileSync(absStatePath, compactStateString);
+
+        // Capture current viewport for restart consistency
+        const vp = page.viewportSize();
+        const meta = {
+            accountName,
+            authIndex: newIndex,
+            contextOptions: {
+                deviceScaleFactor: 1,
+                viewport: vp, // Default or detected
+            },
+            createdAt: new Date().toISOString(),
+            storageStatePath: statePathWithinCache,
+            updatedAt: new Date().toISOString(), // Relative to cache dir
+            version: 1,
+        };
+
+        fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+        console.log(
+            getText(
+                `   📂 持久化缓存元数据已将保存到: ${metaPath}`,
+                `   📂 Persistent cache metadata saved to: ${metaPath}`
             )
         );
     } else {
@@ -251,14 +296,14 @@ const getNextAuthIndex = () => {
             )
         );
 
-        await browser.close();
+        await context.close();
         console.log("");
         console.log(getText("浏览器已关闭。", "Browser closed."));
-        process.exit(1); // Exit with error code when validation fails
+        process.exit(1);
     }
     // ===================================================================
 
-    await browser.close();
+    await context.close();
     console.log("");
     console.log(getText("浏览器已关闭。", "Browser closed."));
 
