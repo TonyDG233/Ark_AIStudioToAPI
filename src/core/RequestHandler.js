@@ -1982,6 +1982,8 @@ class RequestHandler {
             }
         }
 
+        this.logger.debug(`[Proxy] Debug: Final Gemini Request (Google Native) = ${JSON.stringify(bodyObj, null, 2)}`);
+
         return {
             body: req.method !== "GET" ? JSON.stringify(bodyObj) : undefined,
             headers: req.headers,
