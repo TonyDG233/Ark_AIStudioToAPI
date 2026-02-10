@@ -542,9 +542,74 @@
                                 ref="fileInput"
                                 type="file"
                                 style="display: none"
-                                accept=".json"
+                                accept=".json,.zip"
+                                multiple
                                 @change="handleFileUpload"
                             />
+                            <!-- Left: Select all and batch delete -->
+                            <div class="batch-actions">
+                                <el-checkbox
+                                    :model-value="isAllSelected"
+                                    :indeterminate="hasSelection && !isAllSelected"
+                                    :disabled="state.accountDetails.length === 0"
+                                    @change="toggleSelectAll"
+                                >
+                                    {{ t("selectAll") }}
+                                </el-checkbox>
+                                <span v-if="hasSelection" class="selected-count">
+                                    {{ t("selectedCount", { count: selectedCount }) }}
+                                </span>
+                                <button
+                                    v-if="hasSelection"
+                                    class="btn-batch-delete"
+                                    :disabled="isBusy"
+                                    :title="t('batchDelete')"
+                                    @click="batchDeleteAccounts"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path
+                                            d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+                                        />
+                                        <path d="m9.5 10 5 5" />
+                                        <path d="m14.5 10-5 5" />
+                                    </svg>
+                                </button>
+                                <button
+                                    v-if="hasSelection"
+                                    class="btn-batch-download"
+                                    :title="t('batchDownload')"
+                                    @click="batchDownloadAccounts"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path
+                                            d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+                                        />
+                                        <path d="M12 10v6" />
+                                        <path d="m9 13 3 3 3-3" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <!-- Right: Add, upload, and deduplicate -->
                             <div class="icon-buttons">
                                 <button :disabled="isBusy" :title="t('btnAddUser')" @click="addUser">
                                     <svg
@@ -609,15 +674,27 @@
                                 v-for="item in state.accountDetails"
                                 :key="item.index"
                                 class="account-list-item"
-                                :class="{ 'is-current': item.index === state.currentAuthIndex }"
+                                style="cursor: pointer"
+                                :class="{
+                                    'is-current': item.index === state.currentAuthIndex,
+                                    'is-selected': isAccountSelected(item.index),
+                                }"
+                                @click="toggleSelectAccount(item.index)"
                             >
+                                <el-checkbox
+                                    :model-value="isAccountSelected(item.index)"
+                                    class="account-checkbox"
+                                    :aria-label="`Select account #${item.index}`"
+                                    @change="toggleSelectAccount(item.index)"
+                                    @click.stop
+                                />
                                 <el-tooltip
                                     :content="getAccountDisplayName(item)"
                                     placement="top"
                                     effect="dark"
                                     :hide-after="0"
                                 >
-                                    <div class="account-info" style="cursor: pointer">
+                                    <div class="account-info">
                                         <span class="account-index">#{{ item.index }}</span>
                                         <span
                                             class="account-email"
@@ -789,11 +866,27 @@
                                     {{ t("currentVersion") }}
                                 </span>
                                 <span class="value">
-                                    <el-tooltip :content="t('copy')" placement="top">
-                                        <span class="clickable-version" @click="copyAppVersion">
-                                            {{ appVersion }}
+                                    <span class="clickable-version" :title="t('copy')" @click="copyAppVersion">
+                                        {{ appVersion }}
+                                        <span class="copy-icon">
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                width="14"
+                                                height="14"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                                <path
+                                                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                                                ></path>
+                                            </svg>
                                         </span>
-                                    </el-tooltip>
+                                    </span>
                                 </span>
                             </div>
                             <div class="status-item">
@@ -818,23 +911,80 @@
                                     {{ t("latestVersion") }}
                                 </span>
                                 <span class="value">
-                                    <a
+                                    <span
                                         v-if="state.hasUpdate"
-                                        :href="state.releaseUrl || 'https://github.com/iBUHub/AIStudioToAPI/releases'"
-                                        target="_blank"
-                                        class="update-link"
+                                        class="clickable-version"
                                         :title="t('newVersionAvailable')"
                                     >
-                                        {{ latestVersionFormatted }}
-                                    </a>
-                                    <a
-                                        v-else
-                                        href="https://github.com/iBUHub/AIStudioToAPI/releases"
-                                        target="_blank"
-                                        style="color: inherit; text-decoration: none"
-                                    >
-                                        {{ latestVersionFormatted }}
-                                    </a>
+                                        <a
+                                            :href="
+                                                state.releaseUrl || 'https://github.com/iBUHub/AIStudioToAPI/releases'
+                                            "
+                                            target="_blank"
+                                            class="update-link"
+                                        >
+                                            {{ latestVersionFormatted }}
+                                        </a>
+                                        <a
+                                            class="copy-icon"
+                                            :href="
+                                                state.releaseUrl || 'https://github.com/iBUHub/AIStudioToAPI/releases'
+                                            "
+                                            target="_blank"
+                                            style="color: inherit; display: inline-flex"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                width="14"
+                                                height="14"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <path
+                                                    d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+                                                ></path>
+                                                <polyline points="15 3 21 3 21 9"></polyline>
+                                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                                            </svg>
+                                        </a>
+                                    </span>
+                                    <span v-else class="clickable-version" :title="t('viewRelease')">
+                                        <a
+                                            href="https://github.com/iBUHub/AIStudioToAPI/releases"
+                                            target="_blank"
+                                            style="color: inherit; text-decoration: none"
+                                        >
+                                            {{ latestVersionFormatted }}
+                                        </a>
+                                        <a
+                                            class="copy-icon"
+                                            href="https://github.com/iBUHub/AIStudioToAPI/releases"
+                                            target="_blank"
+                                            style="color: inherit; display: inline-flex"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                width="14"
+                                                height="14"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <path
+                                                    d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+                                                ></path>
+                                                <polyline points="15 3 21 3 21 9"></polyline>
+                                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                                            </svg>
+                                        </a>
+                                    </span>
                                 </span>
                             </div>
                         </div>
@@ -1278,6 +1428,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watchEffect } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
+import JSZip from "jszip";
+import escapeHtml from "../utils/escapeHtml";
 import I18n from "../utils/i18n";
 import { useTheme } from "../utils/useTheme";
 
@@ -1334,9 +1486,11 @@ const state = reactive({
     isUpdating: false,
     latestVersion: null,
     logCount: 0,
+    logMaxCount: 100,
     logs: t("loading"),
     logScrollTop: 0,
     releaseUrl: null,
+    selectedAccounts: new Set(), // Selected account indices
     serviceConnected: false,
     streamingModeReal: false,
     // theme: handled by useTheme
@@ -1366,6 +1520,198 @@ const dedupedAvailableCount = computed(() => {
 });
 
 const isBusy = computed(() => state.isSwitchingAccount || state.isSystemBusy);
+
+// Computed properties for batch selection
+const selectedCount = computed(() => state.selectedAccounts.size);
+const hasSelection = computed(() => state.selectedAccounts.size > 0);
+const isAllSelected = computed(() => {
+    if (state.accountDetails.length === 0) return false;
+    return state.accountDetails.every(acc => state.selectedAccounts.has(acc.index));
+});
+const isAccountSelected = index => state.selectedAccounts.has(index);
+
+// Toggle selection for a single account
+const toggleSelectAccount = index => {
+    if (state.selectedAccounts.has(index)) {
+        state.selectedAccounts.delete(index);
+    } else {
+        state.selectedAccounts.add(index);
+    }
+};
+
+// Toggle selection for all accounts
+const toggleSelectAll = () => {
+    if (isAllSelected.value) {
+        state.selectedAccounts.clear();
+    } else {
+        state.accountDetails.forEach(acc => {
+            state.selectedAccounts.add(acc.index);
+        });
+    }
+};
+
+// Clear selection
+const clearSelection = () => {
+    state.selectedAccounts.clear();
+};
+
+// Batch delete accounts
+const batchDeleteAccounts = async () => {
+    if (state.selectedAccounts.size === 0) {
+        ElMessage.warning(t("noAccountSelected"));
+        return;
+    }
+
+    const indices = Array.from(state.selectedAccounts);
+    const count = indices.length;
+
+    // Helper to perform batch delete
+    const performBatchDelete = async (forceDelete = false) => {
+        state.isSwitchingAccount = true;
+        try {
+            const res = await fetch("/api/accounts/batch", {
+                body: JSON.stringify({ force: forceDelete, indices }),
+                headers: { "Content-Type": "application/json" },
+                method: "DELETE",
+            });
+            const data = await res.json();
+
+            if (res.status === 409 && data.requiresConfirmation) {
+                state.isSwitchingAccount = false;
+                ElMessageBox.confirm(t("warningDeleteCurrentAccount"), t("warningTitle"), {
+                    cancelButtonText: t("cancel"),
+                    confirmButtonText: t("ok"),
+                    lockScroll: false,
+                    type: "error",
+                })
+                    .then(() => performBatchDelete(true))
+                    .catch(e => {
+                        if (e !== "cancel") {
+                            console.error(e);
+                        }
+                    });
+                return;
+            }
+
+            if (res.status === 207) {
+                // Handle partial success (Multi-Status) first, as res.ok is true for 2xx
+                ElMessage.warning(
+                    t("batchDeletePartial", {
+                        failedCount: data.failedIndices?.length || 0,
+                        successCount: data.successCount,
+                    })
+                );
+                // Remove deleted items from selection
+                data.successIndices?.forEach(idx => state.selectedAccounts.delete(idx));
+            } else if (res.ok) {
+                // Handle full success (200 OK)
+                ElMessage.success(t("batchDeleteSuccess", { count: data.successCount }));
+                clearSelection();
+            } else {
+                ElMessage.error(t(data.message, data));
+            }
+        } catch (err) {
+            ElMessage.error(t("batchDeleteFailed", { error: err.message || err }));
+        } finally {
+            state.isSwitchingAccount = false;
+            updateContent();
+        }
+    };
+
+    ElMessageBox.confirm(t("confirmBatchDelete", { count }), t("warningTitle"), {
+        cancelButtonText: t("cancel"),
+        confirmButtonText: t("ok"),
+        lockScroll: false,
+        type: "warning",
+    })
+        .then(() => performBatchDelete(false))
+        .catch(e => {
+            if (e !== "cancel") {
+                console.error(e);
+            }
+        });
+};
+
+// Batch download accounts as ZIP
+const batchDownloadAccounts = async () => {
+    if (state.selectedAccounts.size === 0) {
+        ElMessage.warning(t("noAccountSelected"));
+        return;
+    }
+
+    const indices = Array.from(state.selectedAccounts);
+
+    try {
+        const res = await fetch("/api/accounts/batch/download", {
+            body: JSON.stringify({ indices }),
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+        });
+
+        if (!res.ok) {
+            let errorKey = "batchDownloadFailed";
+            let errorParams = { error: res.statusText || `HTTP ${res.status}` };
+
+            try {
+                const contentType = res.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                    const data = await res.json();
+                    if (data.message) {
+                        errorKey = data.message;
+                        errorParams = data;
+                    } else if (data.error) {
+                        const errorDetail = typeof data.error === "string" ? data.error : data.error.message;
+                        errorParams = { error: errorDetail };
+                    }
+                } else {
+                    errorParams = { error: `HTTP Error ${res.status}: ${res.statusText}` };
+                }
+            } catch (e) {
+                // Parsing failed, keep default errorParams
+            }
+            ElMessage.error(t(errorKey, errorParams));
+            return;
+        }
+
+        // Get the blob and trigger download
+        const blob = await res.blob();
+        const contentDisposition = res.headers.get("Content-Disposition");
+        let filename = "auth_batch.zip";
+        if (contentDisposition) {
+            const match = contentDisposition.match(/filename="?([^"]+)"?/);
+            if (match) {
+                filename = match[1];
+            }
+        }
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        // Use actual file count from response header, fallback to indices length
+        const actualCount = parseInt(res.headers.get("X-File-Count"), 10);
+        const requestCount = indices.length;
+        const failedCount = requestCount - (isNaN(actualCount) ? requestCount : actualCount);
+
+        if (!isNaN(actualCount) && failedCount > 0) {
+            ElMessage.warning(
+                t("batchDownloadPartial", {
+                    failedCount,
+                    successCount: actualCount,
+                })
+            );
+        } else {
+            ElMessage.success(t("batchDownloadSuccess", { count: !isNaN(actualCount) ? actualCount : requestCount }));
+        }
+    } catch (err) {
+        ElMessage.error(t("batchDownloadFailed", { error: err.message || err }));
+    }
+};
 
 const currentAccountName = computed(() => {
     if (state.currentAuthIndex < 0) {
@@ -1738,15 +2084,17 @@ const switchAccountByIndex = targetIndex => {
         });
 };
 
-const copyAppVersion = async () => {
+const copyText = async text => {
     try {
-        await navigator.clipboard.writeText(appVersion.value);
+        await navigator.clipboard.writeText(text);
         ElMessage.success(t("copySuccess"));
     } catch (err) {
         ElMessage.error(t("copyFailed"));
-        console.error("Failed to copy version:", err);
+        console.error("Failed to copy:", err);
     }
 };
+
+const copyAppVersion = () => copyText(appVersion.value);
 
 const updateStatus = data => {
     state.serviceConnected = true;
@@ -1766,6 +2114,13 @@ const updateStatus = data => {
     state.debugModeEnabled = isEnabled(data.status.debugMode);
     state.currentAuthIndex = data.status.currentAuthIndex;
     state.accountDetails = data.status.accountDetails || [];
+
+    const validIndices = new Set(state.accountDetails.map(acc => acc.index));
+    for (const idx of state.selectedAccounts) {
+        if (!validIndices.has(idx)) {
+            state.selectedAccounts.delete(idx);
+        }
+    }
     state.browserConnected = data.status.browserConnected;
     state.apiKeySource = data.status.apiKeySource;
     state.usageCount = data.status.usageCount;
@@ -1828,43 +2183,198 @@ const triggerFileUpload = () => {
 };
 
 const handleFileUpload = async event => {
-    const file = event.target.files[0];
-    if (!file) return;
+    const files = Array.from(event.target.files);
+    if (!files.length) return;
 
-    // Reset input so same file can be selected again
+    // Reset input so same files can be selected again
     event.target.value = "";
 
-    const reader = new FileReader();
-    reader.onload = async e => {
-        try {
-            const content = e.target.result;
-            // Validate JSON
-            JSON.parse(content);
+    // Helper function to read file as ArrayBuffer (for zip)
+    const readFileAsArrayBuffer = file =>
+        new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve(e.target.result);
+            reader.onerror = () => reject(new Error(t("fileReadFailed")));
+            reader.readAsArrayBuffer(file);
+        });
 
+    // Helper function to read file as text (for json)
+    const readFileAsText = file =>
+        new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve({ content: e.target.result, name: file.name });
+            reader.onerror = () => reject(new Error(t("fileReadFailed")));
+            reader.readAsText(file);
+        });
+
+    // Helper function to upload a single file
+    const uploadFile = async fileData => {
+        let parsed;
+        try {
+            parsed = JSON.parse(fileData.content);
+        } catch (err) {
+            return { error: t("invalidJson"), filename: fileData.name, success: false };
+        }
+
+        try {
             const res = await fetch("/api/files", {
-                body: JSON.stringify({
-                    content: JSON.parse(content), // Send as object to let backend stringify formatted
-                }),
-                headers: {
-                    "Content-Type": "application/json",
-                },
+                body: JSON.stringify({ content: parsed }),
+                headers: { "Content-Type": "application/json" },
                 method: "POST",
             });
 
             if (res.ok) {
                 const data = await res.json();
-                ElMessage.success(t("fileUploadSuccess") + ` (${data.filename || ""})`);
-                // Immediately update status to reflect new account
-                updateContent();
-            } else {
-                const data = await res.json();
-                ElMessage.error(t("fileUploadFailed", { error: data.error || "Unknown error" }));
+                return { filename: data.filename || fileData.name, success: true };
             }
+
+            let errorMsg = t("unknownError");
+            try {
+                const data = await res.json();
+                if (data.error) errorMsg = data.error;
+            } catch (e) {
+                // Response is not JSON or cannot be parsed, fallback to status text or unknown error
+                if (res.statusText) {
+                    errorMsg = `HTTP Error ${res.status}: ${res.statusText}`;
+                } else {
+                    errorMsg = `HTTP Error ${res.status}`;
+                }
+            }
+            return { error: errorMsg, filename: fileData.name, success: false };
         } catch (err) {
-            ElMessage.error(t("fileUploadFailed", { error: "Invalid JSON file" }));
+            // Network or other fetch errors
+            return { error: err.message || t("networkError"), filename: fileData.name, success: false };
         }
     };
-    reader.readAsText(file);
+
+    // Collect all JSON files to upload (including extracted from zip)
+    const jsonFilesToUpload = [];
+    const extractErrors = [];
+
+    for (const file of files) {
+        const lowerName = file.name.toLowerCase();
+
+        if (lowerName.endsWith(".zip")) {
+            // Extract JSON files from zip
+            try {
+                let arrayBuffer;
+                try {
+                    arrayBuffer = await readFileAsArrayBuffer(file);
+                } catch (readErr) {
+                    extractErrors.push({ local: file.name, reason: readErr.message || t("fileReadFailed") });
+                    continue; // Skip zip processing if read failed
+                }
+
+                const zip = await JSZip.loadAsync(arrayBuffer);
+                const zipEntries = Object.keys(zip.files);
+
+                let foundJsonInZip = false;
+                for (const entryName of zipEntries) {
+                    const entry = zip.files[entryName];
+                    // Skip directories and non-json files
+                    if (entry.dir || !entryName.toLowerCase().endsWith(".json")) continue;
+
+                    foundJsonInZip = true;
+                    try {
+                        const content = await entry.async("string");
+                        // Use format: zipName/entryName for display
+                        const displayName = `${file.name}/${entryName}`;
+                        jsonFilesToUpload.push({ content, name: displayName });
+                    } catch (err) {
+                        extractErrors.push({
+                            local: `${file.name}/${entryName}`,
+                            reason: t("zipExtractFailed"), // Prefer localized generic error for extraction issues
+                        });
+                    }
+                }
+
+                if (!foundJsonInZip) {
+                    extractErrors.push({ local: file.name, reason: t("zipNoJsonFiles") });
+                }
+            } catch (err) {
+                // Catch any other errors during zip processing (e.g. invalid zip format)
+                extractErrors.push({ local: file.name, reason: t("zipExtractFailed") });
+            }
+        } else if (lowerName.endsWith(".json")) {
+            // Regular JSON file
+            try {
+                const fileData = await readFileAsText(file);
+                jsonFilesToUpload.push(fileData);
+            } catch (err) {
+                extractErrors.push({ local: file.name, reason: err.message || t("fileReadFailed") });
+            }
+        }
+    }
+
+    // Check if we have anything to process
+    if (jsonFilesToUpload.length === 0 && extractErrors.length === 0) {
+        ElMessage.warning(t("noSupportedFiles"));
+        return;
+    }
+
+    // Upload all collected JSON files
+    const successFiles = [];
+    const failedFiles = [...extractErrors];
+
+    for (const fileData of jsonFilesToUpload) {
+        const result = await uploadFile(fileData);
+        if (result.success) {
+            successFiles.push({ local: fileData.name, saved: result.filename });
+        } else {
+            failedFiles.push({ local: fileData.name, reason: result.error });
+        }
+    }
+
+    // Build notification message with file details (scrollable container)
+    let messageHtml = '<div style="max-height: 50vh; overflow-y: auto;">';
+
+    if (successFiles.length > 0) {
+        messageHtml += `<div style="margin-bottom: 8px;"><strong style="color: var(--el-color-success);">${t("fileUploadBatchSuccess")} (${successFiles.length}):</strong></div>`;
+        messageHtml += '<ul style="margin: 0 0 12px 16px; padding: 0;">';
+        for (const f of successFiles) {
+            messageHtml += `<li style="word-break: break-all;">${escapeHtml(f.local)} → ${escapeHtml(f.saved)}</li>`;
+        }
+        messageHtml += "</ul>";
+    }
+
+    if (failedFiles.length > 0) {
+        messageHtml += `<div style="margin-bottom: 8px;"><strong style="color: var(--el-color-danger);">${t("fileUploadBatchFailed")} (${failedFiles.length}):</strong></div>`;
+        messageHtml += '<ul style="margin: 0 0 0 16px; padding: 0;">';
+        for (const f of failedFiles) {
+            messageHtml += `<li style="word-break: break-all;">${escapeHtml(f.local)}: ${escapeHtml(f.reason)}</li>`;
+        }
+        messageHtml += "</ul>";
+    }
+
+    messageHtml += "</div>";
+
+    // Determine notification type
+    let notifyType = "success";
+    if (failedFiles.length > 0 && successFiles.length === 0) {
+        notifyType = "error";
+    } else if (failedFiles.length > 0) {
+        notifyType = "warning";
+    }
+
+    // Build title with counts
+    const totalProcessed = successFiles.length + failedFiles.length;
+    let notifyTitle;
+    if (totalProcessed === 1) {
+        notifyTitle = t("fileUploadComplete");
+    } else {
+        notifyTitle = `${t("fileUploadBatchResult")} (✓${successFiles.length} ✗${failedFiles.length})`;
+    }
+
+    ElNotification({
+        dangerouslyUseHTMLString: true,
+        duration: 0,
+        message: messageHtml,
+        position: "top-right",
+        title: notifyTitle,
+        type: notifyType,
+    });
+
+    updateContent();
 };
 
 // Download account by index
@@ -2285,6 +2795,83 @@ watchEffect(() => {
 /* Account list styles */
 .account-top-actions {
     margin-bottom: 16px;
+    justify-content: space-between;
+}
+
+.batch-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    height: 36px; // Force height to match buttons
+
+    .el-checkbox {
+        height: 100%;
+        margin-right: 0;
+        display: flex;
+        align-items: center;
+    }
+}
+
+.selected-count {
+    font-size: 0.85rem;
+    color: @primary-color;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    height: 100%;
+}
+
+.btn-batch-delete {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid @border-color;
+    border-radius: 8px;
+    background: @background-white;
+    color: @text-secondary;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover:not(:disabled) {
+        border-color: @error-color;
+        color: @error-color;
+        background: transparent;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
+.btn-batch-download {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid @border-color;
+    border-radius: 8px;
+    background: @background-white;
+    color: @text-secondary;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover:not(:disabled) {
+        border-color: @primary-color;
+        color: @primary-color;
+        background: transparent;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
 }
 
 .account-list {
@@ -2310,9 +2897,23 @@ watchEffect(() => {
     }
 
     &.is-current {
-        border-color: @primary-color;
-        background: rgba(var(--color-primary-rgb), 0.08);
+        border-color: @success-color;
+        background: rgba(var(--color-success-rgb), 0.25);
     }
+
+    &.is-selected {
+        background: rgba(var(--color-primary-rgb), 0.25); // Darker blue background for selected
+    }
+
+    &.is-current.is-selected {
+        background: rgba(var(--color-primary-rgb), 0.25); // Use blue background like selected
+        border: 1px solid @success-color;
+    }
+}
+
+.account-checkbox {
+    flex-shrink: 0;
+    margin-right: 8px;
 }
 
 .account-info {
@@ -2350,7 +2951,7 @@ watchEffect(() => {
 .current-badge {
     font-size: 0.75rem;
     padding: 2px 8px;
-    background: @primary-color;
+    background: @success-color;
     color: @text-on-primary;
     border-radius: 12px;
     flex-shrink: 0;
@@ -2710,5 +3311,34 @@ watchEffect(() => {
     .mobile-only {
         display: none !important;
     }
+}
+
+.clickable-version,
+.version-align {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+}
+
+.clickable-version {
+    cursor: pointer;
+    transition: color 0.2s;
+
+    &:hover {
+        color: @primary-color;
+
+        .copy-icon {
+            opacity: 1;
+        }
+    }
+}
+
+.copy-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
 }
 </style>

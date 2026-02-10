@@ -7,6 +7,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const archiver = require("archiver");
 const VersionChecker = require("../utils/VersionChecker");
 const LoggingService = require("../utils/LoggingService");
 
@@ -239,6 +240,182 @@ class StatusRoutes {
             } catch (error) {
                 this.logger.error(`[Auth] Dedup cleanup failed: ${error.message}`);
                 return res.status(500).json({ error: error.message, message: "accountDedupFailed" });
+            }
+        });
+
+        // Batch delete accounts - Must be defined before /api/accounts/:index to avoid index matching "batch"
+        app.delete("/api/accounts/batch", isAuthenticated, async (req, res) => {
+            const { indices, force } = req.body;
+            const currentAuthIndex = this.serverSystem.requestHandler.currentAuthIndex;
+
+            // Validate parameters
+            if (!Array.isArray(indices) || indices.length === 0) {
+                return res.status(400).json({ message: "errorInvalidIndex" });
+            }
+
+            const { authSource } = this.serverSystem;
+            const uniqueIndices = Array.from(new Set(indices));
+            const validIndices = uniqueIndices.filter(
+                idx => Number.isInteger(idx) && authSource.initialIndices.includes(idx)
+            );
+
+            const invalidIndices = uniqueIndices.filter(
+                idx => !Number.isInteger(idx) || !authSource.initialIndices.includes(idx)
+            );
+
+            if (validIndices.length === 0) {
+                return res.status(404).json({
+                    indices: invalidIndices.join(", "),
+                    message: "errorAccountsNotFound",
+                });
+            }
+
+            const successIndices = [];
+            const failedIndices = [];
+
+            // Add invalid indices to failed list immediately
+            for (const idx of invalidIndices) {
+                failedIndices.push({
+                    error: "Account not found or invalid",
+                    index: idx,
+                });
+            }
+
+            // Check if current active account is included in VALID indices
+            const includesCurrent = validIndices.includes(currentAuthIndex);
+            if (includesCurrent && !force) {
+                return res.status(409).json({
+                    includesCurrent: true,
+                    message: "warningDeleteCurrentAccount",
+                    requiresConfirmation: true,
+                });
+            }
+
+            for (const targetIndex of validIndices) {
+                try {
+                    authSource.removeAuth(targetIndex);
+                    successIndices.push(targetIndex);
+                    this.logger.warn(`[WebUI] Account #${targetIndex} deleted via batch delete.`);
+                } catch (error) {
+                    failedIndices.push({ error: error.message, index: targetIndex });
+                    this.logger.error(`[WebUI] Failed to delete account #${targetIndex}: ${error.message}`);
+                }
+            }
+
+            // If current active account was deleted, close browser connection
+            if (includesCurrent && successIndices.includes(currentAuthIndex)) {
+                this.logger.warn(
+                    `[WebUI] Current active account #${currentAuthIndex} was deleted. Closing browser connection...`
+                );
+                this.serverSystem.browserManager.closeBrowser().catch(err => {
+                    this.logger.error(`[WebUI] Error closing browser after batch deletion: ${err.message}`);
+                });
+                this.serverSystem.browserManager.currentAuthIndex = -1;
+            }
+
+            if (failedIndices.length > 0) {
+                return res.status(207).json({
+                    failedIndices,
+                    message: "batchDeletePartial",
+                    successCount: successIndices.length,
+                    successIndices,
+                });
+            }
+
+            return res.status(200).json({
+                message: "batchDeleteSuccess",
+                successCount: successIndices.length,
+                successIndices,
+            });
+        });
+
+        // Batch download accounts as ZIP
+        app.post("/api/accounts/batch/download", isAuthenticated, async (req, res) => {
+            const { indices } = req.body;
+
+            // Validate parameters
+            if (!Array.isArray(indices) || indices.length === 0) {
+                return res.status(400).json({ message: "errorInvalidIndex" });
+            }
+
+            const { authSource } = this.serverSystem;
+            const uniqueIndices = Array.from(new Set(indices));
+
+            const invalidIndices = uniqueIndices.filter(
+                idx => !Number.isInteger(idx) || !authSource.initialIndices.includes(idx)
+            );
+
+            const validIndices = uniqueIndices.filter(
+                idx => Number.isInteger(idx) && authSource.initialIndices.includes(idx)
+            );
+
+            if (validIndices.length === 0) {
+                return res.status(404).json({
+                    indices: invalidIndices.join(", "),
+                    message: "errorAccountsNotFound",
+                });
+            }
+
+            const configDir = path.join(process.cwd(), "configs", "auth");
+
+            try {
+                // Pre-calculate valid files to archive
+                const filesToArchive = [];
+                for (const idx of validIndices) {
+                    const filePath = path.join(configDir, `auth-${idx}.json`);
+                    if (fs.existsSync(filePath)) {
+                        filesToArchive.push({ filePath, name: `auth-${idx}.json` });
+                    }
+                }
+
+                const actualFileCount = filesToArchive.length;
+
+                // Set response headers for ZIP download
+                const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+                const filename = `auth_batch_${timestamp}.zip`;
+                res.setHeader("Content-Type", "application/zip");
+                res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+                // Set header with actual file count before piping
+                res.setHeader("X-File-Count", actualFileCount.toString());
+
+                // Create zip archive
+                const archive = archiver("zip", { zlib: { level: 0 } });
+
+                // Handle archive errors
+                archive.on("error", err => {
+                    this.logger.error(`[WebUI] Batch download archive error: ${err.message}`);
+                    if (!res.headersSent) {
+                        res.status(500).json({ error: err.message, message: "batchDownloadFailed" });
+                    } else {
+                        archive.abort();
+                        res.destroy(err);
+                    }
+                });
+
+                // Pipe archive to response
+                archive.pipe(res);
+
+                // Handle client disconnect to prevent wasted resources
+                res.on("close", () => {
+                    if (!res.writableEnded) {
+                        this.logger.warn("[WebUI] Client disconnected during batch download. Aborting archive.");
+                        archive.abort();
+                    }
+                });
+
+                // Add files to archive
+                for (const file of filesToArchive) {
+                    archive.file(file.filePath, { name: file.name });
+                }
+
+                // Finalize archive
+                await archive.finalize();
+                this.logger.info(`[WebUI] Batch downloaded ${actualFileCount} auth files as ZIP.`);
+            } catch (error) {
+                this.logger.error(`[WebUI] Batch download failed: ${error.message}`);
+                if (!res.headersSent) {
+                    res.status(500).json({ error: error.message, message: "batchDownloadFailed" });
+                }
             }
         });
 
