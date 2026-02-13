@@ -44,34 +44,52 @@ class ProxyServerSystem extends EventEmitter {
         // Create ConnectionRegistry with lightweight reconnect callback
         // When WebSocket connection is lost but browser is still running,
         // this callback attempts to refresh the page and re-inject the script
-        this.connectionRegistry = new ConnectionRegistry(this.logger, async () => {
-            // Skip if browser is being intentionally closed (not an unexpected disconnect)
-            if (this.browserManager.isClosingIntentionally) {
-                this.logger.info("[System] Browser is closing intentionally, skipping reconnect attempt.");
-                return;
-            }
-            // Skip if the system is busy switching/recovering to avoid conflicting refreshes
-            if (this.requestHandler?.isSystemBusy) {
-                this.logger.info(
-                    "[System] System is busy (switching/recovering), skipping lightweight reconnect attempt."
-                );
-                return;
-            }
-
-            if (this.browserManager.browser && this.browserManager.page && !this.browserManager.page.isClosed()) {
-                this.logger.error(
-                    "[System] WebSocket lost but browser still running, attempting lightweight reconnect..."
-                );
-                const success = await this.browserManager.attemptLightweightReconnect();
-                if (!success) {
-                    this.logger.warn(
-                        "[System] Lightweight reconnect failed. Will attempt full recovery on next request."
-                    );
+        this.connectionRegistry = new ConnectionRegistry(
+            this.logger,
+            async authIndex => {
+                // Skip if browser is being intentionally closed (not an unexpected disconnect)
+                if (this.browserManager.isClosingIntentionally) {
+                    this.logger.info("[System] Browser is closing intentionally, skipping reconnect attempt.");
+                    return;
                 }
-            } else {
-                this.logger.info("[System] Browser not available, skipping lightweight reconnect.");
-            }
-        });
+
+                // Check if this is the current account
+                const currentAuthIndex = this.browserManager.currentAuthIndex;
+                const isCurrentAccount = authIndex === currentAuthIndex;
+
+                // Only check isSystemBusy if this is the current account
+                if (isCurrentAccount && this.requestHandler?.isSystemBusy) {
+                    this.logger.info(
+                        `[System] Current account #${authIndex} is busy (switching/recovering), skipping lightweight reconnect attempt.`
+                    );
+                    return;
+                }
+
+                // Get the context and page for this specific account
+                const contextData = this.browserManager.contexts.get(authIndex);
+                if (!contextData || !contextData.page || contextData.page.isClosed()) {
+                    this.logger.info(
+                        `[System] Account #${authIndex} page not available or closed, skipping lightweight reconnect.`
+                    );
+                    return;
+                }
+
+                if (this.browserManager.browser) {
+                    this.logger.error(
+                        `[System] WebSocket lost for account #${authIndex} but browser still running, attempting lightweight reconnect...`
+                    );
+                    const success = await this.browserManager.attemptLightweightReconnect(authIndex);
+                    if (!success) {
+                        this.logger.warn(
+                            `[System] Lightweight reconnect failed for account #${authIndex}. Will attempt full recovery on next request.`
+                        );
+                    }
+                } else {
+                    this.logger.info("[System] Browser not available, skipping lightweight reconnect.");
+                }
+            },
+            () => this.browserManager.currentAuthIndex
+        );
         this.requestHandler = new RequestHandler(
             this,
             this.connectionRegistry,
@@ -101,6 +119,28 @@ class ProxyServerSystem extends EventEmitter {
             return; // Exit early
         }
 
+        // Preload all contexts at startup
+        this.logger.info("[System] Starting multi-context preload...");
+        try {
+            this.requestHandler.authSwitcher.isSystemBusy = true; // ← 防止 WebUI 状态检查干扰
+            const preloadResult = await this.browserManager.preloadAllContexts();
+
+            if (preloadResult.successful.length === 0) {
+                this.logger.error("[System] Failed to preload any contexts!");
+                this.emit("started");
+                return;
+            }
+
+            this.logger.info(`[System] ✅ Preloaded ${preloadResult.successful.length} contexts successfully.`);
+        } catch (error) {
+            this.logger.error(`[System] ❌ Context preload failed: ${error.message}`);
+            this.emit("started");
+            return;
+        } finally {
+            this.requestHandler.authSwitcher.isSystemBusy = false; // ← 预加载完成，恢复正常
+        }
+
+        // Determine which context to activate first
         let startupOrder = allRotationIndices.length > 0 ? [...allRotationIndices] : [...allAvailableIndices];
         const hasInitialAuthIndex = Number.isInteger(initialAuthIndex);
         if (hasInitialAuthIndex) {
@@ -123,22 +163,23 @@ class ProxyServerSystem extends EventEmitter {
             }
         } else {
             this.logger.info(
-                `[System] No valid startup index specified, will try in default order [${startupOrder.join(", ")}].`
+                `[System] No valid startup index specified, will activate first available context [${startupOrder[0]}].`
             );
         }
 
+        // Activate the first context (fast switch since already preloaded)
         let isStarted = false;
         for (const index of startupOrder) {
             try {
-                this.logger.info(`[System] Attempting to start service with account #${index}...`);
+                this.logger.info(`[System] Activating pre-loaded context for account #${index}...`);
                 this.requestHandler.authSwitcher.isSystemBusy = true;
                 await this.browserManager.launchOrSwitchContext(index);
 
                 isStarted = true;
-                this.logger.info(`[System] ✅ Successfully started with account #${index}!`);
+                this.logger.info(`[System] ✅ Successfully activated account #${index}!`);
                 break;
             } catch (error) {
-                this.logger.error(`[System] ❌ Failed to start with account #${index}. Reason: ${error.message}`);
+                this.logger.error(`[System] ❌ Failed to activate account #${index}. Reason: ${error.message}`);
             } finally {
                 this.requestHandler.authSwitcher.isSystemBusy = false;
             }
@@ -146,9 +187,8 @@ class ProxyServerSystem extends EventEmitter {
 
         if (!isStarted) {
             this.logger.warn(
-                "[System] All authentication sources failed to initialize. Starting in account binding mode without an active account."
+                "[System] All authentication sources failed to activate. Starting in account binding mode without an active account."
             );
-            // Don't throw an error, just proceed to start servers
         }
 
         this.emit("started");
@@ -499,19 +539,20 @@ class ProxyServerSystem extends EventEmitter {
 
             this.wsServer.on("error", err => {
                 if (!isListening) {
-                    this.logger.error(
-                        `[System] WebSocket server failed to start: ${err.message}`
-                    );
+                    this.logger.error(`[System] WebSocket server failed to start: ${err.message}`);
                     reject(err);
                 } else {
-                    this.logger.error(
-                        `[System] WebSocket server runtime error: ${err.message}`
-                    );
+                    this.logger.error(`[System] WebSocket server runtime error: ${err.message}`);
                 }
             });
             this.wsServer.on("connection", (ws, req) => {
+                // Parse authIndex from query parameter
+                const url = new URL(req.url, `http://${req.headers.host}`);
+                const authIndex = parseInt(url.searchParams.get("authIndex")) || -1;
+
                 this.connectionRegistry.addConnection(ws, {
                     address: req.socket.remoteAddress,
+                    authIndex,
                 });
             });
         });

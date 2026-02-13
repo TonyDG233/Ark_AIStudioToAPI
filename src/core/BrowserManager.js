@@ -22,8 +22,15 @@ class BrowserManager {
         this.config = config;
         this.authSource = authSource;
         this.browser = null;
+
+        // Multi-context architecture: Store all initialized contexts
+        // Map: authIndex -> {context, page, healthMonitorInterval, backgroundWakeupRunning}
+        this.contexts = new Map();
+
+        // Legacy single context references (for backward compatibility)
         this.context = null;
         this.page = null;
+
         // currentAuthIndex is the single source of truth for current account, accessed via getter/setter
         // -1 means no account is currently active (invalid/error state)
         this._currentAuthIndex = -1;
@@ -107,7 +114,9 @@ class BrowserManager {
      * @param {number} authIndex - The auth index to update
      */
     async _updateAuthFile(authIndex) {
-        if (!this.context) return;
+        // 从多上下文 Map 获取目标账号的 context，避免使用 this.context 导致认证数据串线
+        const contextData = this.contexts.get(authIndex);
+        if (!contextData || !contextData.context) return;
 
         // Check availability of auto-update feature from config
         if (!this.config.enableAuthUpdate) {
@@ -128,7 +137,7 @@ class BrowserManager {
                 return;
             }
 
-            const storageState = await this.context.storageState();
+            const storageState = await contextData.context.storageState();
 
             // Merge new credentials into existing data
             authData.cookies = storageState.cookies;
@@ -322,10 +331,11 @@ class BrowserManager {
 
     /**
      * Helper: Load and configure build.js script content
-     * Applies environment-specific configurations (TARGET_DOMAIN, WS_PORT, LOG_LEVEL)
+     * Applies environment-specific configurations (TARGET_DOMAIN, WS_PORT, LOG_LEVEL, AUTH_INDEX)
+     * @param {number} authIndex - The auth index to inject into the script
      * @returns {string} Configured build.js script content
      */
-    _loadAndConfigureBuildScript() {
+    _loadAndConfigureBuildScript(authIndex = -1) {
         let buildScriptContent = fs.readFileSync(
             path.join(__dirname, "..", "..", "scripts", "client", "build.js"),
             "utf-8"
@@ -354,9 +364,9 @@ class BrowserManager {
             const lines = buildScriptContent.split("\n");
             let portReplaced = false;
             for (let i = 0; i < lines.length; i++) {
-                if (lines[i].includes('constructor(endpoint = "ws://127.0.0.1:9998")')) {
+                if (lines[i].includes('constructor(endpoint = "ws://127.0.0.1:9998"')) {
                     this.logger.info(`[Config] Found port config line: ${lines[i]}`);
-                    lines[i] = `    constructor(endpoint = "ws://127.0.0.1:${process.env.WS_PORT}") {`;
+                    lines[i] = `    constructor(endpoint = "ws://127.0.0.1:${process.env.WS_PORT}", authIndex = -1) {`;
                     this.logger.info(`[Config] Replaced with: ${lines[i]}`);
                     portReplaced = true;
                     break;
@@ -397,6 +407,17 @@ class BrowserManager {
             }
         }
 
+        // Inject authIndex into ProxySystem initialization
+        const lines = buildScriptContent.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes("const proxySystem = new ProxySystem()")) {
+                lines[i] = `    const proxySystem = new ProxySystem(undefined, ${authIndex});`;
+                this.logger.debug(`[Config] Injected authIndex ${authIndex} into ProxySystem initialization`);
+                buildScriptContent = lines.join("\n");
+                break;
+            }
+        }
+
         return buildScriptContent;
     }
 
@@ -406,10 +427,10 @@ class BrowserManager {
      * @param {string} buildScriptContent - The script content to inject
      * @param {string} logPrefix - Log prefix for step messages (e.g., "[Browser]" or "[Reconnect]")
      */
-    async _injectScriptToEditor(buildScriptContent, logPrefix = "[Browser]") {
+    async _injectScriptToEditor(page, buildScriptContent, logPrefix = "[Browser]") {
         this.logger.info(`${logPrefix} Preparing UI interaction, forcefully removing all possible overlay layers...`);
         /* eslint-disable no-undef */
-        await this.page.evaluate(() => {
+        await page.evaluate(() => {
             const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
             if (overlays.length > 0) {
                 console.log(`[ProxyClient] (Internal JS) Found and removed ${overlays.length} overlay layers.`);
@@ -424,14 +445,14 @@ class BrowserManager {
             try {
                 this.logger.info(`  [Attempt ${i}/${maxTimes}] Cleaning overlay layers and clicking...`);
                 /* eslint-disable no-undef */
-                await this.page.evaluate(() => {
+                await page.evaluate(() => {
                     document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
                 });
                 /* eslint-enable no-undef */
-                await this.page.waitForTimeout(500);
+                await page.waitForTimeout(500);
 
                 // Use Smart Click instead of hardcoded locator
-                await this._smartClickCode(this.page);
+                await this._smartClickCode(page);
 
                 this.logger.info("  ✅ Click successful!");
                 break;
@@ -446,7 +467,7 @@ class BrowserManager {
         this.logger.info(
             `${logPrefix} (Step 2/5) "Code" button clicked successfully, waiting for editor to become visible...`
         );
-        const editorContainerLocator = this.page.locator("div.monaco-editor").first();
+        const editorContainerLocator = page.locator("div.monaco-editor").first();
         await editorContainerLocator.waitFor({
             state: "visible",
             timeout: 60000,
@@ -456,7 +477,7 @@ class BrowserManager {
             `${logPrefix} (Cleanup #2) Preparing to click editor, forcefully removing all possible overlay layers again...`
         );
         /* eslint-disable no-undef */
-        await this.page.evaluate(() => {
+        await page.evaluate(() => {
             const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
             if (overlays.length > 0) {
                 console.log(
@@ -466,26 +487,26 @@ class BrowserManager {
             }
         });
         /* eslint-enable no-undef */
-        await this.page.waitForTimeout(250);
+        await page.waitForTimeout(250);
 
         this.logger.info(`${logPrefix} (Step 3/5) Editor displayed, focusing and pasting script...`);
         await editorContainerLocator.click({ timeout: 30000 });
 
         /* eslint-disable no-undef */
-        await this.page.evaluate(text => navigator.clipboard.writeText(text), buildScriptContent);
+        await page.evaluate(text => navigator.clipboard.writeText(text), buildScriptContent);
         /* eslint-enable no-undef */
         const isMac = os.platform() === "darwin";
         const pasteKey = isMac ? "Meta+V" : "Control+V";
-        await this.page.keyboard.press(pasteKey);
+        await page.keyboard.press(pasteKey);
         this.logger.info(`${logPrefix} (Step 4/5) Script pasted.`);
         this.logger.info(`${logPrefix} (Step 5/5) Clicking "Preview" button to activate script...`);
-        await this.page.locator('button:text("Preview")').click();
+        await page.locator('button:text("Preview")').click();
         this.logger.info(`${logPrefix} ✅ UI interaction complete, script is now running.`);
 
         // Active Trigger (Hack to wake up Google Backend)
         this.logger.info(`${logPrefix} ⚡ Sending active trigger request to Launch flow...`);
         try {
-            await this.page.evaluate(async () => {
+            await page.evaluate(async () => {
                 try {
                     await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=ActiveTrigger", {
                         headers: { "Content-Type": "application/json" },
@@ -498,20 +519,19 @@ class BrowserManager {
         } catch (e) {
             /* empty */
         }
-
-        this._startHealthMonitor();
     }
 
     /**
      * Helper: Navigate to target page and wake up the page
      * Contains the common navigation and page activation logic
+     * @param {Page} page - The page object to navigate
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
      */
-    async _navigateAndWakeUpPage(logPrefix = "[Browser]") {
+    async _navigateAndWakeUpPage(page, logPrefix = "[Browser]") {
         this.logger.info(`${logPrefix} Navigating to target page...`);
         const targetUrl =
             "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showCode=true&showAssistant=true";
-        await this.page.goto(targetUrl, {
+        await page.goto(targetUrl, {
             timeout: 180000,
             waitUntil: "domcontentloaded",
         });
@@ -519,40 +539,41 @@ class BrowserManager {
 
         // Wake up window using JS and Human Movement
         try {
-            await this.page.bringToFront();
+            await page.bringToFront();
 
             // Get viewport size for realistic movement range
-            const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
+            const vp = page.viewportSize() || { height: 1080, width: 1920 };
 
             // 1. Move to a random point to simulate activity
             const randomX = Math.floor(Math.random() * (vp.width * 0.7));
             const randomY = Math.floor(Math.random() * (vp.height * 0.7));
-            await this._simulateHumanMovement(this.page, randomX, randomY);
+            await this._simulateHumanMovement(page, randomX, randomY);
 
             // 2. Move to (1,1) specifically for a safe click, using human simulation
-            await this._simulateHumanMovement(this.page, 1, 1);
-            await this.page.mouse.down();
-            await this.page.waitForTimeout(50 + Math.random() * 100);
-            await this.page.mouse.up();
+            await this._simulateHumanMovement(page, 1, 1);
+            await page.mouse.down();
+            await page.waitForTimeout(50 + Math.random() * 100);
+            await page.mouse.up();
 
             this.logger.info(`${logPrefix} ✅ Executed realistic page activation (Random -> 1,1 Click).`);
         } catch (e) {
             this.logger.warn(`${logPrefix} Wakeup minor error: ${e.message}`);
         }
-        await this.page.waitForTimeout(2000 + Math.random() * 2000);
+        await page.waitForTimeout(2000 + Math.random() * 2000);
     }
 
     /**
      * Helper: Check page status and detect various error conditions
      * Detects: cookie expiration, region restrictions, 403 errors, page load failures
+     * @param {Page} page - The page object to check
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
      * @throws {Error} If any error condition is detected
      */
-    async _checkPageStatusAndErrors(logPrefix = "[Browser]") {
-        const currentUrl = this.page.url();
+    async _checkPageStatusAndErrors(page, logPrefix = "[Browser]") {
+        const currentUrl = page.url();
         let pageTitle = "";
         try {
-            pageTitle = await this.page.title();
+            pageTitle = await page.title();
         } catch (e) {
             this.logger.warn(`${logPrefix} Unable to get page title: ${e.message}`);
         }
@@ -590,9 +611,10 @@ class BrowserManager {
     /**
      * Helper: Handle various popups with intelligent detection
      * Uses short polling instead of long hard-coded timeouts
+     * @param {Page} page - The page object to check for popups
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
      */
-    async _handlePopups(logPrefix = "[Browser]") {
+    async _handlePopups(page, logPrefix = "[Browser]") {
         this.logger.info(`${logPrefix} 🔍 Starting intelligent popup detection (max 6s)...`);
 
         const popupConfigs = [
@@ -630,7 +652,7 @@ class BrowserManager {
                 if (handledPopups.has(popup.name)) continue;
 
                 try {
-                    const element = this.page.locator(popup.selector).first();
+                    const element = page.locator(popup.selector).first();
                     // Quick visibility check with very short timeout
                     if (await element.isVisible({ timeout: 200 })) {
                         this.logger.info(popup.logFound);
@@ -638,7 +660,7 @@ class BrowserManager {
                         handledPopups.add(popup.name);
                         foundAny = true;
                         // Short pause after clicking to let next popup appear
-                        await this.page.waitForTimeout(800);
+                        await page.waitForTimeout(800);
                     }
                 } catch (error) {
                     // Element not visible or doesn't exist is expected here,
@@ -680,7 +702,7 @@ class BrowserManager {
             }
 
             if (i < maxIterations - 1) {
-                await this.page.waitForTimeout(pollInterval);
+                await page.waitForTimeout(pollInterval);
             }
         }
     }
@@ -688,20 +710,37 @@ class BrowserManager {
     /**
      * Feature: Background Health Monitor (The "Scavenger")
      * Periodically cleans up popups and keeps the session alive.
+     * In multi-context mode, stores the interval in the context data.
      */
     _startHealthMonitor() {
-        // Clear existing interval if any
-        if (this.healthMonitorInterval) clearInterval(this.healthMonitorInterval);
+        const authIndex = this._currentAuthIndex;
+        if (authIndex < 0) {
+            this.logger.warn("[Browser] Cannot start health monitor: no active auth index");
+            return;
+        }
 
-        this.logger.info("[Browser] 🛡️ Background health monitor service (Scavenger) started...");
+        // Get context data
+        const contextData = this.contexts.get(authIndex);
+        if (!contextData) {
+            this.logger.warn(`[Browser] Cannot start health monitor: context #${authIndex} not found`);
+            return;
+        }
+
+        // Clear existing interval if any
+        if (contextData.healthMonitorInterval) {
+            clearInterval(contextData.healthMonitorInterval);
+        }
+
+        this.logger.info(`[Context#${authIndex}] 🛡️ Background health monitor service (Scavenger) started...`);
 
         let tickCount = 0;
 
         // Run every 4 seconds
-        this.healthMonitorInterval = setInterval(async () => {
-            const page = this.page;
+        contextData.healthMonitorInterval = setInterval(async () => {
+            const page = contextData.page;
             if (!page || page.isClosed()) {
-                clearInterval(this.healthMonitorInterval);
+                clearInterval(contextData.healthMonitorInterval);
+                contextData.healthMonitorInterval = null;
                 return;
             }
 
@@ -740,13 +779,13 @@ class BrowserManager {
 
                 // 3. Auto-Save Auth: Every ~24 hours (21600 ticks * 4s = 86400s)
                 if (tickCount % 21600 === 0) {
-                    if (this._currentAuthIndex >= 0) {
-                        try {
-                            this.logger.info("[HealthMonitor] 💾 Triggering daily periodic auth file update...");
-                            await this._updateAuthFile(this._currentAuthIndex);
-                        } catch (e) {
-                            this.logger.warn(`[HealthMonitor] Auth update failed: ${e.message}`);
-                        }
+                    try {
+                        this.logger.info(
+                            `[HealthMonitor#${authIndex}] 💾 Triggering daily periodic auth file update...`
+                        );
+                        await this._updateAuthFile(authIndex);
+                    } catch (e) {
+                        this.logger.warn(`[HealthMonitor#${authIndex}] Auth update failed: ${e.message}`);
                     }
                 }
 
@@ -793,20 +832,30 @@ class BrowserManager {
 
     /**
      * Helper: Save debug information (screenshot and HTML) to root directory
+     * @param {string} suffix - Suffix for the debug file names
+     * @param {number} [authIndex] - Optional auth index to get the correct page from contexts Map
      */
-    async _saveDebugArtifacts(suffix = "final") {
-        if (!this.page || this.page.isClosed()) return;
+    async _saveDebugArtifacts(suffix = "final", authIndex = null) {
+        // 优先从 contexts Map 获取指定账号的 page，回退到 this.page
+        let targetPage = this.page;
+        if (authIndex !== null && this.contexts.has(authIndex)) {
+            const ctxData = this.contexts.get(authIndex);
+            if (ctxData && ctxData.page) {
+                targetPage = ctxData.page;
+            }
+        }
+        if (!targetPage || targetPage.isClosed()) return;
         try {
             const timestamp = new Date().toISOString().replace(/[:.]/g, "-").substring(0, 19);
             const screenshotPath = path.join(process.cwd(), `debug_screenshot_${suffix}_${timestamp}.png`);
-            await this.page.screenshot({
+            await targetPage.screenshot({
                 fullPage: true,
                 path: screenshotPath,
             });
             this.logger.info(`[Debug] Failure screenshot saved to: ${screenshotPath}`);
 
             const htmlPath = path.join(process.cwd(), `debug_page_source_${suffix}_${timestamp}.html`);
-            const htmlContent = await this.page.content();
+            const htmlContent = await targetPage.content();
             fs.writeFileSync(htmlPath, htmlContent);
             this.logger.info(`[Debug] Failure page source saved to: ${htmlPath}`);
         } catch (e) {
@@ -1024,6 +1073,162 @@ class BrowserManager {
         return { browser: vncBrowser, context };
     }
 
+    /**
+     * Preload all available auth contexts at startup
+     * This method initializes all contexts in parallel and keeps them ready for instant switching
+     * @returns {Promise<{successful: number[], failed: Array<{index: number, error: string}>}>}
+     */
+    async preloadAllContexts() {
+        this.logger.info("==================================================");
+        this.logger.info("🚀 [MultiContext] Starting preload of all auth contexts...");
+        this.logger.info("==================================================");
+
+        // Launch browser if not already running
+        const proxyConfig = parseProxyFromEnv();
+        if (!this.browser) {
+            this.logger.info("🚀 [Browser] Launching main browser instance...");
+            if (!fs.existsSync(this.browserExecutablePath)) {
+                throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
+            }
+            this.browser = await firefox.launch({
+                args: this.launchArgs,
+                executablePath: this.browserExecutablePath,
+                firefoxUserPrefs: this.firefoxUserPrefs,
+                headless: true,
+                ...(proxyConfig ? { proxy: proxyConfig } : {}),
+            });
+            this.browser.on("disconnected", () => {
+                this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
+                this.browser = null;
+                this.contexts.clear();
+                this.context = null;
+                this.page = null;
+                this._currentAuthIndex = -1;
+            });
+            this.logger.info("✅ [Browser] Main browser instance launched successfully.");
+        }
+
+        // Get all available auth indices
+        const allAuthIndices = this.authSource.availableIndices;
+        if (allAuthIndices.length === 0) {
+            this.logger.warn("[MultiContext] No auth files found, skipping preload.");
+            return { failed: [], successful: [] };
+        }
+
+        this.logger.info(
+            `[MultiContext] Found ${allAuthIndices.length} auth files to preload: [${allAuthIndices.join(", ")}]`
+        );
+
+        const successful = [];
+        const failed = [];
+
+        // Preload contexts sequentially to avoid overwhelming the system
+        for (const authIndex of allAuthIndices) {
+            try {
+                this.logger.info(`[MultiContext] Preloading context for account #${authIndex}...`);
+                await this._initializeContext(authIndex);
+                successful.push(authIndex);
+                this.logger.info(`✅ [MultiContext] Account #${authIndex} context preloaded successfully.`);
+            } catch (error) {
+                this.logger.error(`❌ [MultiContext] Failed to preload account #${authIndex}: ${error.message}`);
+                failed.push({ error: error.message, index: authIndex });
+            }
+        }
+
+        this.logger.info("==================================================");
+        this.logger.info(
+            `✅ [MultiContext] Preload complete: ${successful.length} successful, ${failed.length} failed`
+        );
+        if (successful.length > 0) {
+            this.logger.info(`   • Successful: [${successful.join(", ")}]`);
+        }
+        if (failed.length > 0) {
+            this.logger.info(`   • Failed: [${failed.map(f => f.index).join(", ")}]`);
+        }
+        this.logger.info("==================================================");
+
+        return { failed, successful };
+    }
+
+    /**
+     * Initialize a single context for the given auth index
+     * This is a helper method used by both preloadAllContexts and launchOrSwitchContext
+     * @param {number} authIndex - The auth index to initialize
+     * @returns {Promise<{context, page}>}
+     */
+    async _initializeContext(authIndex) {
+        const proxyConfig = parseProxyFromEnv();
+        const storageStateObject = this.authSource.getAuth(authIndex);
+        if (!storageStateObject) {
+            throw new Error(`Failed to get or parse auth source for index ${authIndex}.`);
+        }
+
+        const buildScriptContent = this._loadAndConfigureBuildScript(authIndex);
+
+        // Viewport Randomization
+        const randomWidth = 1920 + Math.floor(Math.random() * 50);
+        const randomHeight = 1080 + Math.floor(Math.random() * 50);
+
+        const context = await this.browser.newContext({
+            deviceScaleFactor: 1,
+            storageState: storageStateObject,
+            viewport: { height: randomHeight, width: randomWidth },
+            ...(proxyConfig ? { proxy: proxyConfig } : {}),
+        });
+
+        // Inject Privacy Script immediately after context creation
+        const privacyScript = this._getPrivacyProtectionScript(authIndex);
+        await context.addInitScript(privacyScript);
+
+        const page = await context.newPage();
+
+        // Pure JS Wakeup (Focus & Click)
+        try {
+            await page.bringToFront();
+            // eslint-disable-next-line no-undef
+            await page.evaluate(() => window.focus());
+            const vp = page.viewportSize() || { height: 1080, width: 1920 };
+            const startX = Math.floor(Math.random() * (vp.width * 0.5));
+            const startY = Math.floor(Math.random() * (vp.height * 0.5));
+            await this._simulateHumanMovement(page, startX, startY);
+            await page.mouse.down();
+            await page.waitForTimeout(100);
+            await page.mouse.up();
+        } catch (e) {
+            this.logger.warn(`[Context#${authIndex}] Wakeup minor error: ${e.message}`);
+        }
+
+        page.on("console", msg => {
+            const msgText = msg.text();
+            if (msgText.includes("Content-Security-Policy")) {
+                return;
+            }
+            if (msgText.includes("[ProxyClient]")) {
+                this.logger.info(`[Context#${authIndex}] ${msgText.replace("[ProxyClient] ", "")}`);
+            } else if (msg.type() === "error") {
+                this.logger.error(`[Context#${authIndex} Page Error] ${msgText}`);
+            }
+        });
+
+        await this._navigateAndWakeUpPage(page, `[Context#${authIndex}]`);
+        await this._checkPageStatusAndErrors(page, `[Context#${authIndex}]`);
+        await this._handlePopups(page, `[Context#${authIndex}]`);
+        await this._injectScriptToEditor(page, buildScriptContent, `[Context#${authIndex}]`);
+
+        // Save to contexts map
+        this.contexts.set(authIndex, {
+            backgroundWakeupRunning: false,
+            context,
+            healthMonitorInterval: null,
+            page,
+        });
+
+        // Update auth file
+        await this._updateAuthFile(authIndex);
+
+        return { context, page };
+    }
+
     async launchOrSwitchContext(authIndex) {
         if (typeof authIndex !== "number" || authIndex < 0) {
             this.logger.error(`[Browser] Invalid authIndex: ${authIndex}. authIndex must be >= 0.`);
@@ -1032,7 +1237,7 @@ class BrowserManager {
         }
 
         // [Auth Switch] Save current auth data before switching
-        if (this.browser && this._currentAuthIndex >= 0) {
+        if (this.browser && this._currentAuthIndex >= 0 && this._currentAuthIndex !== authIndex) {
             try {
                 await this._updateAuthFile(this._currentAuthIndex);
             } catch (e) {
@@ -1040,12 +1245,9 @@ class BrowserManager {
             }
         }
 
-        const proxyConfig = parseProxyFromEnv();
-        if (proxyConfig) {
-            this.logger.info(`[Browser] 🌐 Using proxy: ${proxyConfig.server}`);
-        }
-
+        // Check if browser is running, launch if needed
         if (!this.browser) {
+            const proxyConfig = parseProxyFromEnv();
             this.logger.info("🚀 [Browser] Main browser instance not running, performing first-time launch...");
             if (!fs.existsSync(this.browserExecutablePath)) {
                 this._currentAuthIndex = -1;
@@ -1055,115 +1257,82 @@ class BrowserManager {
                 args: this.launchArgs,
                 executablePath: this.browserExecutablePath,
                 firefoxUserPrefs: this.firefoxUserPrefs,
-                headless: true, // Main browser is always headless
+                headless: true,
                 ...(proxyConfig ? { proxy: proxyConfig } : {}),
             });
             this.browser.on("disconnected", () => {
                 this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
                 this.browser = null;
+                this.contexts.clear();
                 this.context = null;
                 this.page = null;
                 this._currentAuthIndex = -1;
-                this.logger.warn("[Browser] Reset currentAuthIndex to -1 due to unexpected disconnect.");
             });
             this.logger.info("✅ [Browser] Main browser instance successfully launched.");
         }
 
-        if (this.healthMonitorInterval) {
-            clearInterval(this.healthMonitorInterval);
-            this.healthMonitorInterval = null;
-            this.logger.info("[Browser] Stopped background tasks (Scavenger) for old page.");
-        }
+        // Check if context already exists (fast switch path)
+        if (this.contexts.has(authIndex)) {
+            this.logger.info("==================================================");
+            this.logger.info(`⚡ [FastSwitch] Switching to pre-loaded context for account #${authIndex}`);
+            this.logger.info("==================================================");
 
-        if (this.context) {
-            this.logger.info("[Browser] Closing old API browser context...");
-            const closePromise = this.context.close();
-            const timeoutPromise = new Promise(r => setTimeout(r, 5000)); // 5秒超时
-            await Promise.race([closePromise, timeoutPromise]);
-            this.context = null;
-            this.page = null;
-            this.logger.info("[Browser] Old API context closed.");
-        }
-
-        const sourceDescription = `File auth-${authIndex}.json`;
-        this.logger.info("==================================================");
-        this.logger.info(`🔄 [Browser] Creating new API browser context for account #${authIndex}`);
-        this.logger.info(`   • Auth source: ${sourceDescription}`);
-        this.logger.info("==================================================");
-
-        const storageStateObject = this.authSource.getAuth(authIndex);
-        if (!storageStateObject) {
-            throw new Error(`Failed to get or parse auth source for index ${authIndex}.`);
-        }
-
-        const buildScriptContent = this._loadAndConfigureBuildScript();
-
-        try {
-            // Viewport Randomization
-            const randomWidth = 1920 + Math.floor(Math.random() * 50);
-            const randomHeight = 1080 + Math.floor(Math.random() * 50);
-
-            this.context = await this.browser.newContext({
-                deviceScaleFactor: 1,
-                storageState: storageStateObject,
-                viewport: { height: randomHeight, width: randomWidth },
-                ...(proxyConfig ? { proxy: proxyConfig } : {}),
-            });
-
-            // Inject Privacy Script immediately after context creation
-            const privacyScript = this._getPrivacyProtectionScript(authIndex);
-            await this.context.addInitScript(privacyScript);
-
-            this.page = await this.context.newPage();
-
-            // Pure JS Wakeup (Focus & Click)
-            try {
-                await this.page.bringToFront();
-                // eslint-disable-next-line no-undef
-                await this.page.evaluate(() => window.focus());
-                // Get viewport size for realistic movement range
-                const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
-                const startX = Math.floor(Math.random() * (vp.width * 0.5));
-                const startY = Math.floor(Math.random() * (vp.height * 0.5));
-                await this._simulateHumanMovement(this.page, startX, startY);
-                await this.page.mouse.down();
-                await this.page.waitForTimeout(100);
-                await this.page.mouse.up();
-                this.logger.info("[Browser] ⚡ Forced window wake-up via JS focus.");
-            } catch (e) {
-                this.logger.warn(`[Browser] Wakeup minor error: ${e.message}`);
+            // Stop background tasks for old context
+            if (this._currentAuthIndex >= 0 && this.contexts.has(this._currentAuthIndex)) {
+                const oldContextData = this.contexts.get(this._currentAuthIndex);
+                if (oldContextData.healthMonitorInterval) {
+                    clearInterval(oldContextData.healthMonitorInterval);
+                    oldContextData.healthMonitorInterval = null;
+                }
             }
 
-            this.page.on("console", msg => {
-                const msgText = msg.text();
-                if (msgText.includes("Content-Security-Policy")) {
-                    return;
-                }
-
-                if (msgText.includes("[ProxyClient]")) {
-                    this.logger.info(`[Browser] ${msgText.replace("[ProxyClient] ", "")}`);
-                } else if (msg.type() === "error") {
-                    this.logger.error(`[Browser Page Error] ${msgText}`);
-                }
-            });
-
-            await this._navigateAndWakeUpPage("[Browser]");
-
-            // Check for cookie expiration, region restrictions, and other errors
-            await this._checkPageStatusAndErrors("[Browser]");
-
-            // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
-            await this._handlePopups("[Browser]");
-
-            await this._injectScriptToEditor(buildScriptContent, "[Browser]");
-
-            // Start background wakeup service - only started here during initial browser launch
-            this._startBackgroundWakeup();
-
+            // Switch to new context
+            const contextData = this.contexts.get(authIndex);
+            this.context = contextData.context;
+            this.page = contextData.page;
             this._currentAuthIndex = authIndex;
 
-            // [Auth Update] Save the refreshed cookies to the auth file immediately
-            await this._updateAuthFile(authIndex);
+            // Start background tasks for new context
+            this._startHealthMonitor();
+            if (!contextData.backgroundWakeupRunning) {
+                this._startBackgroundWakeup();
+                contextData.backgroundWakeupRunning = true;
+            }
+
+            this.logger.info(`✅ [FastSwitch] Switched to account #${authIndex} instantly!`);
+            return;
+        }
+
+        // Context doesn't exist, need to initialize it (slow path)
+        this.logger.info("==================================================");
+        this.logger.info(`🔄 [Browser] Context for account #${authIndex} not found, initializing...`);
+        this.logger.info("==================================================");
+
+        try {
+            // Stop background tasks for old context
+            if (this._currentAuthIndex >= 0 && this.contexts.has(this._currentAuthIndex)) {
+                const oldContextData = this.contexts.get(this._currentAuthIndex);
+                if (oldContextData.healthMonitorInterval) {
+                    clearInterval(oldContextData.healthMonitorInterval);
+                    oldContextData.healthMonitorInterval = null;
+                }
+            }
+
+            // Initialize new context
+            const { context, page } = await this._initializeContext(authIndex);
+
+            // Update current references
+            this.context = context;
+            this.page = page;
+            this._currentAuthIndex = authIndex;
+
+            // Start background tasks
+            this._startHealthMonitor();
+            this._startBackgroundWakeup();
+            const contextData = this.contexts.get(authIndex);
+            if (contextData) {
+                contextData.backgroundWakeupRunning = true;
+            }
 
             this.logger.info("==================================================");
             this.logger.info(`✅ [Browser] Account ${authIndex} context initialized successfully!`);
@@ -1171,8 +1340,7 @@ class BrowserManager {
             this.logger.info("==================================================");
         } catch (error) {
             this.logger.error(`❌ [Browser] Account ${authIndex} context initialization failed: ${error.message}`);
-            await this._saveDebugArtifacts("init_failed");
-            await this.closeBrowser();
+            await this._saveDebugArtifacts("init_failed", authIndex);
             this._currentAuthIndex = -1;
             throw error;
         }
@@ -1187,63 +1355,97 @@ class BrowserManager {
      *
      * @returns {Promise<boolean>} true if reconnect was successful, false otherwise
      */
-    async attemptLightweightReconnect() {
+    /**
+     * Attempt lightweight reconnect for a specific account
+     * Refreshes the page and re-injects the proxy script without restarting the browser
+     * @param {number} authIndex - The auth index to reconnect (defaults to current if not specified)
+     * @returns {Promise<boolean>} true if reconnect was successful, false otherwise
+     */
+    async attemptLightweightReconnect(authIndex = null) {
+        // Use provided authIndex or fall back to current
+        const targetAuthIndex = authIndex !== null ? authIndex : this._currentAuthIndex;
+
+        if (targetAuthIndex < 0) {
+            this.logger.warn("[Reconnect] Invalid auth index, cannot perform lightweight reconnect.");
+            return false;
+        }
+
+        // Get the context data for this account
+        const contextData = this.contexts.get(targetAuthIndex);
+        if (!contextData || !contextData.page) {
+            this.logger.warn(
+                `[Reconnect] No context found for account #${targetAuthIndex}, cannot perform lightweight reconnect.`
+            );
+            return false;
+        }
+
+        const page = contextData.page;
+
         // Verify browser and page are still valid
-        if (!this.browser || !this.page) {
-            this.logger.warn("[Reconnect] Browser or page is not available, cannot perform lightweight reconnect.");
+        if (!this.browser || !page) {
+            this.logger.warn(
+                `[Reconnect] Browser or page is not available for account #${targetAuthIndex}, cannot perform lightweight reconnect.`
+            );
             return false;
         }
 
         // Check if page is closed
-        if (this.page.isClosed()) {
-            this.logger.warn("[Reconnect] Page is closed, cannot perform lightweight reconnect.");
-            return false;
-        }
-
-        const authIndex = this._currentAuthIndex;
-        if (authIndex < 0) {
-            this.logger.warn("[Reconnect] No current auth index, cannot perform lightweight reconnect.");
+        if (page.isClosed()) {
+            this.logger.warn(
+                `[Reconnect] Page is closed for account #${targetAuthIndex}, cannot perform lightweight reconnect.`
+            );
             return false;
         }
 
         this.logger.info("==================================================");
-        this.logger.info(`🔄 [Reconnect] Starting lightweight reconnect for account #${authIndex}...`);
+        this.logger.info(`🔄 [Reconnect] Starting lightweight reconnect for account #${targetAuthIndex}...`);
         this.logger.info("==================================================");
 
-        // Stop existing background tasks
-        if (this.healthMonitorInterval) {
-            clearInterval(this.healthMonitorInterval);
-            this.healthMonitorInterval = null;
-            this.logger.info("[Reconnect] Stopped background health monitor.");
+        // Stop existing background tasks only if this is the current account
+        const isCurrentAccount = targetAuthIndex === this._currentAuthIndex;
+        if (isCurrentAccount) {
+            const ctxData = this.contexts.get(targetAuthIndex);
+            if (ctxData && ctxData.healthMonitorInterval) {
+                clearInterval(ctxData.healthMonitorInterval);
+                ctxData.healthMonitorInterval = null;
+                this.logger.info("[Reconnect] Stopped background health monitor.");
+            }
         }
 
         try {
             // Load and configure the build.js script using the shared helper
-            const buildScriptContent = this._loadAndConfigureBuildScript();
+            const buildScriptContent = this._loadAndConfigureBuildScript(targetAuthIndex);
 
             // Navigate to target page and wake it up
-            await this._navigateAndWakeUpPage("[Reconnect]");
+            await this._navigateAndWakeUpPage(page, "[Reconnect]");
 
             // Check for cookie expiration, region restrictions, and other errors
-            await this._checkPageStatusAndErrors("[Reconnect]");
+            await this._checkPageStatusAndErrors(page, "[Reconnect]");
 
             // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
-            await this._handlePopups("[Reconnect]");
+            await this._handlePopups(page, "[Reconnect]");
 
             // Use shared script injection helper with [Reconnect] log prefix
-            await this._injectScriptToEditor(buildScriptContent, "[Reconnect]");
+            await this._injectScriptToEditor(page, buildScriptContent, "[Reconnect]");
 
             // [Auth Update] Save the refreshed cookies to the auth file immediately
-            await this._updateAuthFile(authIndex);
+            await this._updateAuthFile(targetAuthIndex);
 
             this.logger.info("==================================================");
-            this.logger.info(`✅ [Reconnect] Lightweight reconnect successful for account #${authIndex}!`);
+            this.logger.info(`✅ [Reconnect] Lightweight reconnect successful for account #${targetAuthIndex}!`);
             this.logger.info("==================================================");
+
+            // Restart background tasks only if this is the current account
+            if (isCurrentAccount) {
+                this._startHealthMonitor();
+            }
 
             return true;
         } catch (error) {
-            this.logger.error(`❌ [Reconnect] Lightweight reconnect failed: ${error.message}`);
-            await this._saveDebugArtifacts("reconnect_failed");
+            this.logger.error(
+                `❌ [Reconnect] Lightweight reconnect failed for account #${targetAuthIndex}: ${error.message}`
+            );
+            await this._saveDebugArtifacts("reconnect_failed", targetAuthIndex);
             return false;
         }
     }
@@ -1251,18 +1453,30 @@ class BrowserManager {
     /**
      * Unified cleanup method for the main browser instance.
      * Handles intervals, timeouts, and resetting all references.
+     * In multi-context mode, cleans up all contexts.
      */
     async closeBrowser() {
         // Set flag to indicate intentional close - prevents ConnectionRegistry from
         // attempting lightweight reconnect when WebSocket disconnects
         this.isClosingIntentionally = true;
 
+        // Clean up all context health monitors
+        for (const [authIndex, contextData] of this.contexts.entries()) {
+            if (contextData.healthMonitorInterval) {
+                clearInterval(contextData.healthMonitorInterval);
+                contextData.healthMonitorInterval = null;
+                this.logger.info(`[Browser] Stopped health monitor for context #${authIndex}`);
+            }
+        }
+
+        // Legacy single health monitor cleanup (for backward compatibility)
         if (this.healthMonitorInterval) {
             clearInterval(this.healthMonitorInterval);
             this.healthMonitorInterval = null;
         }
+
         if (this.browser) {
-            this.logger.info("[Browser] Closing main browser instance...");
+            this.logger.info("[Browser] Closing main browser instance and all contexts...");
             try {
                 // Give close() 5 seconds, otherwise force proceed
                 await Promise.race([this.browser.close(), new Promise(resolve => setTimeout(resolve, 5000))]);
@@ -1272,10 +1486,11 @@ class BrowserManager {
 
             // Reset all references
             this.browser = null;
+            this.contexts.clear();
             this.context = null;
             this.page = null;
             this._currentAuthIndex = -1;
-            this.logger.info("[Browser] Main browser instance closed, currentAuthIndex reset to -1.");
+            this.logger.info("[Browser] Main browser instance and all contexts closed, currentAuthIndex reset to -1.");
         }
 
         // Reset flag after close is complete

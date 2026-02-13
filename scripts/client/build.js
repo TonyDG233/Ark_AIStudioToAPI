@@ -99,9 +99,10 @@ const Logger = {
 class ConnectionManager extends EventTarget {
     // [BrowserManager Injection Point] Do not modify the line below.
     // This line is dynamically replaced by BrowserManager.js based on WS_PORT environment variable.
-    constructor(endpoint = "ws://127.0.0.1:9998") {
+    constructor(endpoint = "ws://127.0.0.1:9998", authIndex = -1) {
         super();
         this.endpoint = endpoint;
+        this.authIndex = authIndex;
         this.socket = null;
         this.isConnected = false;
         this.reconnectDelay = 5000;
@@ -110,10 +111,12 @@ class ConnectionManager extends EventTarget {
 
     async establish() {
         if (this.isConnected) return Promise.resolve();
-        Logger.output("Connecting to server:", this.endpoint);
+        // Add authIndex to WebSocket URL for server-side identification
+        const wsUrl = this.authIndex >= 0 ? `${this.endpoint}?authIndex=${this.authIndex}` : this.endpoint;
+        Logger.output("Connecting to server:", wsUrl);
         return new Promise((resolve, reject) => {
             try {
-                this.socket = new WebSocket(this.endpoint);
+                this.socket = new WebSocket(wsUrl);
                 this.socket.addEventListener("open", () => {
                     this.isConnected = true;
                     this.reconnectAttempts = 0;
@@ -504,9 +507,9 @@ class RequestProcessor {
 }
 
 class ProxySystem extends EventTarget {
-    constructor(websocketEndpoint) {
+    constructor(websocketEndpoint, authIndex = -1) {
         super();
-        this.connectionManager = new ConnectionManager(websocketEndpoint);
+        this.connectionManager = new ConnectionManager(websocketEndpoint, authIndex);
         this.requestProcessor = new RequestProcessor();
         this._setupEventHandlers();
     }

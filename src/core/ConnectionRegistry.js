@@ -16,27 +16,49 @@ class ConnectionRegistry extends EventEmitter {
     /**
      * @param {Object} logger - Logger instance
      * @param {Function} [onConnectionLostCallback] - Optional callback to invoke when connection is lost after grace period
+     * @param {Function} [getCurrentAuthIndex] - Function to get current auth index
      */
-    constructor(logger, onConnectionLostCallback = null) {
+    constructor(logger, onConnectionLostCallback = null, getCurrentAuthIndex = null) {
         super();
         this.logger = logger;
         this.onConnectionLostCallback = onConnectionLostCallback;
-        this.connections = new Set();
+        this.getCurrentAuthIndex = getCurrentAuthIndex;
+        // Map: authIndex -> WebSocket connection
+        this.connectionsByAuth = new Map();
         this.messageQueues = new Map();
-        this.reconnectGraceTimer = null;
-        this.isReconnecting = false; // Flag to prevent multiple simultaneous reconnect attempts
+        // Map: authIndex -> timerId, supports independent grace period for each account
+        this.reconnectGraceTimers = new Map();
+        // Map: authIndex -> boolean, supports independent reconnect status for each account
+        this.reconnectingAccounts = new Map();
     }
 
     addConnection(websocket, clientInfo) {
-        if (this.reconnectGraceTimer) {
-            clearTimeout(this.reconnectGraceTimer);
-            this.reconnectGraceTimer = null;
-            this.messageQueues.forEach(queue => queue.close());
-            this.messageQueues.clear();
+        // Clear grace timer for this specific authIndex only, without affecting other accounts
+        const incomingAuthIndex = clientInfo.authIndex;
+        if (
+            incomingAuthIndex !== undefined &&
+            incomingAuthIndex >= 0 &&
+            this.reconnectGraceTimers.has(incomingAuthIndex)
+        ) {
+            clearTimeout(this.reconnectGraceTimers.get(incomingAuthIndex));
+            this.reconnectGraceTimers.delete(incomingAuthIndex);
+            this.logger.info(`[Server] Grace timer cleared for reconnected authIndex=${incomingAuthIndex}`);
         }
 
-        this.connections.add(websocket);
-        this.logger.info(`[Server] Internal WebSocket client connected (from: ${clientInfo.address})`);
+        // Store connection by authIndex if provided
+        const authIndex = clientInfo.authIndex;
+        if (authIndex !== undefined && authIndex >= 0) {
+            this.connectionsByAuth.set(authIndex, websocket);
+            this.logger.info(
+                `[Server] Internal WebSocket client connected (from: ${clientInfo.address}, authIndex: ${authIndex})`
+            );
+        } else {
+            this.logger.info(`[Server] Internal WebSocket client connected (from: ${clientInfo.address})`);
+        }
+
+        // Store authIndex on websocket for cleanup
+        websocket._authIndex = authIndex;
+
         websocket.on("message", data => this._handleIncomingMessage(data.toString()));
         websocket.on("close", () => this._removeConnection(websocket));
         websocket.on("error", error =>
@@ -46,33 +68,57 @@ class ConnectionRegistry extends EventEmitter {
     }
 
     _removeConnection(websocket) {
-        this.connections.delete(websocket);
-        this.logger.info("[Server] Internal WebSocket client disconnected.");
+        const disconnectedAuthIndex = websocket._authIndex;
 
-        // Clear any existing grace timer before starting a new one
-        // This prevents multiple timers from running if connections disconnect in quick succession
-        if (this.reconnectGraceTimer) {
-            clearTimeout(this.reconnectGraceTimer);
+        // Remove from connectionsByAuth if it has an authIndex
+        if (disconnectedAuthIndex !== undefined && disconnectedAuthIndex >= 0) {
+            this.connectionsByAuth.delete(disconnectedAuthIndex);
+            this.logger.info(`[Server] Internal WebSocket client disconnected (authIndex: ${disconnectedAuthIndex}).`);
+        } else {
+            this.logger.info("[Server] Internal WebSocket client disconnected.");
         }
 
-        this.logger.info("[Server] Starting 5-second reconnect grace period...");
-        this.reconnectGraceTimer = setTimeout(async () => {
-            this.logger.info(
-                "[Server] Grace period ended, no reconnection detected. Connection lost confirmed, cleaning up all pending requests..."
-            );
-            this.messageQueues.forEach(queue => queue.close());
-            this.messageQueues.clear();
+        // Clear any existing grace timer for THIS account before starting a new one
+        if (
+            disconnectedAuthIndex !== undefined &&
+            disconnectedAuthIndex >= 0 &&
+            this.reconnectGraceTimers.has(disconnectedAuthIndex)
+        ) {
+            clearTimeout(this.reconnectGraceTimers.get(disconnectedAuthIndex));
+        }
 
-            // Attempt lightweight reconnect if callback is provided and not already reconnecting
-            if (this.onConnectionLostCallback && !this.isReconnecting) {
-                this.isReconnecting = true;
+        this.logger.info(`[Server] Starting 5-second reconnect grace period for account #${disconnectedAuthIndex}...`);
+        const graceTimerId = setTimeout(async () => {
+            this.logger.info(
+                `[Server] Grace period ended for account #${disconnectedAuthIndex}, no reconnection detected.`
+            );
+
+            // Re-check if this is the current account at the time of grace period expiry
+            const currentAuthIndex = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
+            const isCurrentAccount = disconnectedAuthIndex === currentAuthIndex;
+
+            // Only clear message queues if this is the current account
+            if (isCurrentAccount) {
+                this.logger.info("[Server] Current account disconnected, cleaning up all pending requests...");
+                this.messageQueues.forEach(queue => queue.close());
+                this.messageQueues.clear();
+            } else {
+                this.logger.info(
+                    `[Server] Non-current account #${disconnectedAuthIndex} disconnected, keeping message queues intact.`
+                );
+            }
+
+            // Attempt lightweight reconnect if callback is provided and this account is not already reconnecting
+            const isAccountReconnecting = this.reconnectingAccounts.get(disconnectedAuthIndex) || false;
+            if (this.onConnectionLostCallback && !isAccountReconnecting) {
+                this.reconnectingAccounts.set(disconnectedAuthIndex, true);
                 const lightweightReconnectTimeoutMs = 55000;
                 this.logger.info(
-                    `[Server] Attempting lightweight reconnect (timeout ${lightweightReconnectTimeoutMs / 1000}s)...`
+                    `[Server] Attempting lightweight reconnect for account #${disconnectedAuthIndex} (timeout ${lightweightReconnectTimeoutMs / 1000}s)...`
                 );
                 let timeoutId;
                 try {
-                    const callbackPromise = this.onConnectionLostCallback();
+                    const callbackPromise = this.onConnectionLostCallback(disconnectedAuthIndex);
                     const timeoutPromise = new Promise((_, reject) => {
                         timeoutId = setTimeout(
                             () => reject(new Error("Lightweight reconnect timed out")),
@@ -80,21 +126,29 @@ class ConnectionRegistry extends EventEmitter {
                         );
                     });
                     await Promise.race([callbackPromise, timeoutPromise]);
-                    this.logger.info("[Server] Lightweight reconnect callback completed.");
+                    this.logger.info(
+                        `[Server] Lightweight reconnect callback completed for account #${disconnectedAuthIndex}.`
+                    );
                 } catch (error) {
-                    this.logger.error(`[Server] Lightweight reconnect failed: ${error.message}`);
+                    this.logger.error(
+                        `[Server] Lightweight reconnect failed for account #${disconnectedAuthIndex}: ${error.message}`
+                    );
                 } finally {
                     if (timeoutId) {
                         clearTimeout(timeoutId);
                     }
-                    this.isReconnecting = false;
+                    this.reconnectingAccounts.delete(disconnectedAuthIndex);
                 }
             }
 
             this.emit("connectionLost");
 
-            this.reconnectGraceTimer = null;
+            this.reconnectGraceTimers.delete(disconnectedAuthIndex);
         }, 5000);
+
+        if (disconnectedAuthIndex !== undefined && disconnectedAuthIndex >= 0) {
+            this.reconnectGraceTimers.set(disconnectedAuthIndex, graceTimerId);
+        }
 
         this.emit("connectionRemoved", websocket);
     }
@@ -134,20 +188,27 @@ class ConnectionRegistry extends EventEmitter {
         }
     }
 
-    hasActiveConnections() {
-        return this.connections.size > 0;
-    }
-
     isReconnectingInProgress() {
-        return this.isReconnecting;
+        // Check if any account is currently reconnecting
+        return this.reconnectingAccounts.size > 0;
     }
 
     isInGracePeriod() {
-        return !!this.reconnectGraceTimer;
+        // Only check if current account is in grace period, to avoid non-current account disconnection affecting current account's request handling
+        const currentAuthIndex = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
+        return currentAuthIndex >= 0 && this.reconnectGraceTimers.has(currentAuthIndex);
     }
 
-    getFirstConnection() {
-        return this.connections.values().next().value;
+    getConnectionByAuth(authIndex) {
+        const connection = this.connectionsByAuth.get(authIndex);
+        if (connection) {
+            this.logger.debug(`[Registry] Found WebSocket connection for authIndex=${authIndex}`);
+        } else {
+            this.logger.warn(
+                `[Registry] No WebSocket connection found for authIndex=${authIndex}. Available: [${Array.from(this.connectionsByAuth.keys()).join(", ")}]`
+            );
+        }
+        return connection;
     }
 
     createMessageQueue(requestId) {
