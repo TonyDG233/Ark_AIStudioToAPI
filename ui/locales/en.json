@@ -105,6 +105,7 @@
     "expand": "Expand",
     "fake": "Fake",
     "false": "Disabled",
+    "fastSwitch": "Fast Switch Account",
     "fileReadFailed": "Failed to read file",
     "fileUploadBatchFailed": "Failed files",
     "fileUploadBatchResult": "Batch upload complete",

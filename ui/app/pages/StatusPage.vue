@@ -710,12 +710,17 @@
                                 <div class="account-actions">
                                     <button
                                         class="btn-switch"
-                                        :class="{ 'is-active': item.index === state.currentAuthIndex }"
+                                        :class="{
+                                            'is-active': item.index === state.currentAuthIndex,
+                                            'is-fast': item.hasContext && item.index !== state.currentAuthIndex,
+                                        }"
                                         :disabled="isBusy || item.index === state.currentAuthIndex"
                                         :title="
                                             item.index === state.currentAuthIndex
                                                 ? t('currentAccount')
-                                                : t('btnSwitchAccount')
+                                                : item.hasContext
+                                                  ? t('fastSwitch')
+                                                  : t('btnSwitchAccount')
                                         "
                                         @click.stop="switchAccountByIndex(item.index)"
                                     >
@@ -2993,6 +2998,17 @@ watchEffect(() => {
             color: @success-color;
             opacity: 1 !important;
             cursor: not-allowed;
+        }
+
+        &.btn-switch.is-fast {
+            color: #f59e0b;
+            border-color: #fcd34d;
+        }
+
+        &.btn-switch.is-fast:hover:not(:disabled) {
+            border-color: @success-color;
+            color: @success-color;
+            background-color: @background-white;
         }
 
         &:disabled {

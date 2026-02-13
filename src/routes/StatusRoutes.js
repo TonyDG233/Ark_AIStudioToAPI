@@ -611,7 +611,9 @@ class StatusRoutes {
             const isDuplicate = canonicalIndex !== null && canonicalIndex !== index;
             const isRotation = rotationIndices.includes(index);
 
-            return { canonicalIndex, index, isDuplicate, isInvalid, isRotation, name };
+            const hasContext = browserManager.contexts.has(index);
+
+            return { canonicalIndex, hasContext, index, isDuplicate, isInvalid, isRotation, name };
         });
 
         const currentAuthIndex = requestHandler.currentAuthIndex;
