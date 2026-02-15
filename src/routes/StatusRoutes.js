@@ -116,20 +116,19 @@ class StatusRoutes {
                 return res.json(this._getStatusData());
             }
 
-            // After reloading, only check for auth validity if a browser is active.
-            if (browserManager.browser) {
-                const currentAuthIndex = requestHandler.currentAuthIndex;
-
-                if (currentAuthIndex === -1 || !authSource.availableIndices.includes(currentAuthIndex)) {
+            // After reloading, only check for auth validity if a browser is active and has a valid current account.
+            const currentAuthIndex = requestHandler.currentAuthIndex;
+            if (browserManager.browser && currentAuthIndex >= 0) {
+                if (!authSource.availableIndices.includes(currentAuthIndex)) {
                     this.logger.warn(
                         `[System] Current auth index #${currentAuthIndex} is no longer valid after reload (e.g., file deleted).`
                     );
-                    this.logger.warn("[System] Closing browser connection due to invalid auth.");
+                    this.logger.warn("[System] Closing context for invalid auth.");
                     try {
-                        // Await closing to prevent repeated checks on subsequent status polls
-                        await browserManager.closeBrowser();
+                        // Close only the invalid account's context, not the entire browser
+                        await browserManager.closeContext(currentAuthIndex);
                     } catch (err) {
-                        this.logger.error(`[System] Error while closing browser automatically: ${err.message}`);
+                        this.logger.error(`[System] Error while closing context automatically: ${err.message}`);
                     }
                 }
             }
@@ -302,15 +301,26 @@ class StatusRoutes {
                 }
             }
 
-            // If current active account was deleted, close browser connection
+            // If current active account was deleted, close context first, then connection
             if (includesCurrent && successIndices.includes(currentAuthIndex)) {
                 this.logger.warn(
-                    `[WebUI] Current active account #${currentAuthIndex} was deleted. Closing browser connection...`
+                    `[WebUI] Current active account #${currentAuthIndex} was deleted. Closing context and connection...`
                 );
-                this.serverSystem.browserManager.closeBrowser().catch(err => {
-                    this.logger.error(`[WebUI] Error closing browser after batch deletion: ${err.message}`);
-                });
-                this.serverSystem.browserManager.currentAuthIndex = -1;
+                // Close context first so page is gone when _removeConnection checks
+                await this.serverSystem.browserManager.closeContext(currentAuthIndex);
+                // Then close WebSocket connection
+                this.serverSystem.connectionRegistry.closeConnectionByAuth(currentAuthIndex);
+            }
+
+            // Close contexts and connections for all successfully deleted accounts (except current, already handled)
+            for (const idx of successIndices) {
+                if (idx !== currentAuthIndex) {
+                    this.logger.info(`[WebUI] Closing context and connection for deleted account #${idx}...`);
+                    // Close context first so page is gone when _removeConnection checks
+                    await this.serverSystem.browserManager.closeContext(idx);
+                    // Then close WebSocket connection
+                    this.serverSystem.connectionRegistry.closeConnectionByAuth(idx);
+                }
             }
 
             if (failedIndices.length > 0) {
@@ -419,7 +429,7 @@ class StatusRoutes {
             }
         });
 
-        app.delete("/api/accounts/:index", isAuthenticated, (req, res) => {
+        app.delete("/api/accounts/:index", isAuthenticated, async (req, res) => {
             const rawIndex = req.params.index;
             const targetIndex = Number(rawIndex);
             const currentAuthIndex = this.serverSystem.requestHandler.currentAuthIndex;
@@ -447,19 +457,14 @@ class StatusRoutes {
             try {
                 authSource.removeAuth(targetIndex);
 
-                // If deleting current account, close browser connection
-                if (targetIndex === currentAuthIndex) {
-                    this.logger.warn(
-                        `[WebUI] Current active account #${targetIndex} was deleted. Closing browser connection...`
-                    );
-                    this.serverSystem.browserManager.closeBrowser().catch(err => {
-                        this.logger.error(`[WebUI] Error closing browser after account deletion: ${err.message}`);
-                    });
-                    // Reset current account index through browserManager
-                    this.serverSystem.browserManager.currentAuthIndex = -1;
-                }
+                // Always close context first, then connection
+                this.logger.info(`[WebUI] Account #${targetIndex} deleted. Closing context and connection...`);
+                // Close context first so page is gone when _removeConnection checks
+                await this.serverSystem.browserManager.closeContext(targetIndex);
+                // Then close WebSocket connection
+                this.serverSystem.connectionRegistry.closeConnectionByAuth(targetIndex);
 
-                this.logger.warn(
+                this.logger.info(
                     `[WebUI] Account #${targetIndex} deleted via web interface. Previous current account: #${currentAuthIndex}`
                 );
                 res.status(200).json({
@@ -635,7 +640,7 @@ class StatusRoutes {
             status: {
                 accountDetails,
                 apiKeySource: config.apiKeySource,
-                browserConnected: !!browserManager.browser,
+                browserConnected: !!this.serverSystem.connectionRegistry.getConnectionByAuth(currentAuthIndex),
                 currentAccountName,
                 currentAuthIndex,
                 debugMode: LoggingService.isDebugEnabled(),

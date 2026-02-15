@@ -18,11 +18,12 @@ class ConnectionRegistry extends EventEmitter {
      * @param {Function} [onConnectionLostCallback] - Optional callback to invoke when connection is lost after grace period
      * @param {Function} [getCurrentAuthIndex] - Function to get current auth index
      */
-    constructor(logger, onConnectionLostCallback = null, getCurrentAuthIndex = null) {
+    constructor(logger, onConnectionLostCallback = null, getCurrentAuthIndex = null, browserManager = null) {
         super();
         this.logger = logger;
         this.onConnectionLostCallback = onConnectionLostCallback;
         this.getCurrentAuthIndex = getCurrentAuthIndex;
+        this.browserManager = browserManager;
         // Map: authIndex -> WebSocket connection
         this.connectionsByAuth = new Map();
         this.messageQueues = new Map();
@@ -76,6 +77,23 @@ class ConnectionRegistry extends EventEmitter {
             this.logger.info(`[Server] Internal WebSocket client disconnected (authIndex: ${disconnectedAuthIndex}).`);
         } else {
             this.logger.info("[Server] Internal WebSocket client disconnected.");
+        }
+
+        // Check if the page still exists for this account
+        // If page is closed/missing, it means the context was intentionally closed, skip reconnect
+        if (disconnectedAuthIndex !== undefined && disconnectedAuthIndex >= 0 && this.browserManager) {
+            const contextData = this.browserManager.contexts.get(disconnectedAuthIndex);
+            if (!contextData || !contextData.page || contextData.page.isClosed()) {
+                this.logger.info(
+                    `[Server] Account #${disconnectedAuthIndex} page is closed/missing, skipping reconnect logic.`
+                );
+                // Clear any existing grace timer
+                if (this.reconnectGraceTimers.has(disconnectedAuthIndex)) {
+                    clearTimeout(this.reconnectGraceTimers.get(disconnectedAuthIndex));
+                    this.reconnectGraceTimers.delete(disconnectedAuthIndex);
+                }
+                return;
+            }
         }
 
         // Clear any existing grace timer for THIS account before starting a new one
@@ -204,11 +222,37 @@ class ConnectionRegistry extends EventEmitter {
         if (connection) {
             this.logger.debug(`[Registry] Found WebSocket connection for authIndex=${authIndex}`);
         } else {
-            this.logger.warn(
+            this.logger.debug(
                 `[Registry] No WebSocket connection found for authIndex=${authIndex}. Available: [${Array.from(this.connectionsByAuth.keys()).join(", ")}]`
             );
         }
         return connection;
+    }
+
+    /**
+     * Close WebSocket connection for a specific account
+     * @param {number} authIndex - The auth index to close connection for
+     */
+    closeConnectionByAuth(authIndex) {
+        const connection = this.connectionsByAuth.get(authIndex);
+        if (connection) {
+            this.logger.info(`[Registry] Closing WebSocket connection for authIndex=${authIndex}`);
+            try {
+                connection.close();
+            } catch (e) {
+                this.logger.warn(`[Registry] Error closing WebSocket for authIndex=${authIndex}: ${e.message}`);
+            }
+            // Remove from map immediately (the close event will also trigger _removeConnection)
+            this.connectionsByAuth.delete(authIndex);
+
+            // Clear any grace timers for this account
+            if (this.reconnectGraceTimers.has(authIndex)) {
+                clearTimeout(this.reconnectGraceTimers.get(authIndex));
+                this.reconnectGraceTimers.delete(authIndex);
+            }
+        } else {
+            this.logger.debug(`[Registry] No WebSocket connection to close for authIndex=${authIndex}`);
+        }
     }
 
     createMessageQueue(requestId) {

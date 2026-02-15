@@ -88,7 +88,8 @@ class ProxyServerSystem extends EventEmitter {
                     this.logger.info("[System] Browser not available, skipping lightweight reconnect.");
                 }
             },
-            () => this.browserManager.currentAuthIndex
+            () => this.browserManager.currentAuthIndex,
+            this.browserManager
         );
         this.requestHandler = new RequestHandler(
             this,
@@ -548,7 +549,8 @@ class ProxyServerSystem extends EventEmitter {
             this.wsServer.on("connection", (ws, req) => {
                 // Parse authIndex from query parameter
                 const url = new URL(req.url, `http://${req.headers.host}`);
-                const authIndex = parseInt(url.searchParams.get("authIndex")) || -1;
+                const authIndexParam = url.searchParams.get("authIndex");
+                const authIndex = authIndexParam !== null ? parseInt(authIndexParam, 10) : -1;
 
                 this.connectionRegistry.addConnection(ws, {
                     address: req.socket.remoteAddress,

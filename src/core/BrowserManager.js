@@ -737,95 +737,114 @@ class BrowserManager {
 
         // Run every 4 seconds
         contextData.healthMonitorInterval = setInterval(async () => {
-            const page = contextData.page;
-            if (!page || page.isClosed()) {
-                clearInterval(contextData.healthMonitorInterval);
-                contextData.healthMonitorInterval = null;
-                return;
-            }
-
-            tickCount++;
-
             try {
-                // 1. Keep-Alive: Random micro-actions (30% chance)
-                if (Math.random() < 0.3) {
-                    try {
-                        // Optimized randomness based on viewport
-                        const vp = page.viewportSize() || { height: 1080, width: 1920 };
-
-                        // Scroll
-                        // eslint-disable-next-line no-undef
-                        await page.evaluate(() => window.scrollBy(0, (Math.random() - 0.5) * 20));
-                        // Human-like mouse jitter
-                        const x = Math.floor(Math.random() * (vp.width * 0.8));
-                        const y = Math.floor(Math.random() * (vp.height * 0.8));
-                        await this._simulateHumanMovement(page, x, y);
-                    } catch (e) {
-                        /* empty */
+                const page = contextData.page;
+                // Double check page status
+                if (!page || page.isClosed()) {
+                    if (contextData.healthMonitorInterval) {
+                        clearInterval(contextData.healthMonitorInterval);
+                        contextData.healthMonitorInterval = null;
+                        this.logger.info(`[HealthMonitor#${authIndex}] Page closed, stopped background task.`);
                     }
+                    return;
                 }
 
-                // 2. Anti-Timeout: Click top-left corner (1,1) every ~1 minute (15 ticks)
-                if (tickCount % 15 === 0) {
-                    try {
-                        await this._simulateHumanMovement(page, 1, 1);
-                        await page.mouse.down();
-                        await page.waitForTimeout(100 + Math.random() * 100);
-                        await page.mouse.up();
-                    } catch (e) {
-                        /* empty */
-                    }
-                }
+                tickCount++;
 
-                // 3. Auto-Save Auth: Every ~24 hours (21600 ticks * 4s = 86400s)
-                if (tickCount % 21600 === 0) {
-                    try {
-                        this.logger.info(
-                            `[HealthMonitor#${authIndex}] 💾 Triggering daily periodic auth file update...`
-                        );
-                        await this._updateAuthFile(authIndex);
-                    } catch (e) {
-                        this.logger.warn(`[HealthMonitor#${authIndex}] Auth update failed: ${e.message}`);
-                    }
-                }
+                try {
+                    // 1. Keep-Alive: Random micro-actions (30% chance)
+                    if (Math.random() < 0.3) {
+                        try {
+                            // Optimized randomness based on viewport
+                            const vp = page.viewportSize() || { height: 1080, width: 1920 };
 
-                // 4. Popup & Overlay Cleanup
-                await page.evaluate(() => {
-                    const blockers = [
-                        "div.cdk-overlay-backdrop",
-                        "div.cdk-overlay-container",
-                        "div.cdk-global-overlay-wrapper",
-                    ];
-
-                    const targetTexts = ["Reload", "Retry", "Got it", "Dismiss", "Not now"];
-
-                    // Remove passive blockers
-                    blockers.forEach(selector => {
-                        // eslint-disable-next-line no-undef
-                        document.querySelectorAll(selector).forEach(el => el.remove());
-                    });
-
-                    // Click active buttons if visible
-                    // eslint-disable-next-line no-undef
-                    document.querySelectorAll("button").forEach(btn => {
-                        // 检查元素是否占据空间（简单的可见性检查）
-                        const rect = btn.getBoundingClientRect();
-                        const isVisible = rect.width > 0 && rect.height > 0;
-
-                        if (isVisible) {
-                            const text = (btn.innerText || "").trim();
-                            const ariaLabel = btn.getAttribute("aria-label");
-
-                            // 匹配文本 或 aria-label
-                            if (targetTexts.includes(text) || ariaLabel === "Close") {
-                                console.log(`[ProxyClient] HealthMonitor clicking: ${text || "Close Button"}`);
-                                btn.click();
-                            }
+                            // Scroll
+                            // eslint-disable-next-line no-undef
+                            await page.evaluate(() => window.scrollBy(0, (Math.random() - 0.5) * 20));
+                            // Human-like mouse jitter
+                            const x = Math.floor(Math.random() * (vp.width * 0.8));
+                            const y = Math.floor(Math.random() * (vp.height * 0.8));
+                            await this._simulateHumanMovement(page, x, y);
+                        } catch (e) {
+                            /* empty */
                         }
+                    }
+
+                    // 2. Anti-Timeout: Click top-left corner (1,1) every ~1 minute (15 ticks)
+                    if (tickCount % 15 === 0) {
+                        try {
+                            await this._simulateHumanMovement(page, 1, 1);
+                            await page.mouse.down();
+                            await page.waitForTimeout(100 + Math.random() * 100);
+                            await page.mouse.up();
+                        } catch (e) {
+                            /* empty */
+                        }
+                    }
+
+                    // 3. Auto-Save Auth: Every ~24 hours (21600 ticks * 4s = 86400s)
+                    if (tickCount % 21600 === 0) {
+                        try {
+                            this.logger.info(
+                                `[HealthMonitor#${authIndex}] 💾 Triggering daily periodic auth file update...`
+                            );
+                            await this._updateAuthFile(authIndex);
+                        } catch (e) {
+                            this.logger.warn(`[HealthMonitor#${authIndex}] Auth update failed: ${e.message}`);
+                        }
+                    }
+
+                    // 4. Popup & Overlay Cleanup
+                    await page.evaluate(() => {
+                        const blockers = [
+                            "div.cdk-overlay-backdrop",
+                            "div.cdk-overlay-container",
+                            "div.cdk-global-overlay-wrapper",
+                        ];
+
+                        const targetTexts = ["Reload", "Retry", "Got it", "Dismiss", "Not now"];
+
+                        // Remove passive blockers
+                        blockers.forEach(selector => {
+                            // eslint-disable-next-line no-undef
+                            document.querySelectorAll(selector).forEach(el => el.remove());
+                        });
+
+                        // Click active buttons if visible
+                        // eslint-disable-next-line no-undef
+                        document.querySelectorAll("button").forEach(btn => {
+                            // 检查元素是否占据空间（简单的可见性检查）
+                            const rect = btn.getBoundingClientRect();
+                            const isVisible = rect.width > 0 && rect.height > 0;
+
+                            if (isVisible) {
+                                const text = (btn.innerText || "").trim();
+                                const ariaLabel = btn.getAttribute("aria-label");
+
+                                // 匹配文本 或 aria-label
+                                if (targetTexts.includes(text) || ariaLabel === "Close") {
+                                    console.log(`[ProxyClient] HealthMonitor clicking: ${text || "Close Button"}`);
+                                    btn.click();
+                                }
+                            }
+                        });
                     });
-                });
-            } catch (err) {
-                // Silent catch to prevent log spamming on navigation
+                } catch (err) {
+                    // Silent catch to prevent log spamming on navigation
+                }
+            } catch (globalError) {
+                // Catch any other unexpected errors in the interval
+                this.logger.warn(`[HealthMonitor#${authIndex}] Detailed error: ${globalError.message}`);
+                // If the page is definitely gone, stop the monitor
+                if (globalError.message.includes("Target page, context or browser has been closed")) {
+                    if (contextData.healthMonitorInterval) {
+                        clearInterval(contextData.healthMonitorInterval);
+                        contextData.healthMonitorInterval = null;
+                        this.logger.info(
+                            `[HealthMonitor#${authIndex}] Page closed (detected by error), stopped background task.`
+                        );
+                    }
+                }
             }
         }, 4000);
     }
@@ -1098,7 +1117,11 @@ class BrowserManager {
                 ...(proxyConfig ? { proxy: proxyConfig } : {}),
             });
             this.browser.on("disconnected", () => {
-                this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
+                if (!this.isClosingIntentionally) {
+                    this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
+                } else {
+                    this.logger.info("[Browser] Main browser closed intentionally.");
+                }
                 this.browser = null;
                 this.contexts.clear();
                 this.context = null;
@@ -1169,64 +1192,80 @@ class BrowserManager {
         const randomWidth = 1920 + Math.floor(Math.random() * 50);
         const randomHeight = 1080 + Math.floor(Math.random() * 50);
 
-        const context = await this.browser.newContext({
-            deviceScaleFactor: 1,
-            storageState: storageStateObject,
-            viewport: { height: randomHeight, width: randomWidth },
-            ...(proxyConfig ? { proxy: proxyConfig } : {}),
-        });
+        let context = null;
+        let page = null;
 
-        // Inject Privacy Script immediately after context creation
-        const privacyScript = this._getPrivacyProtectionScript(authIndex);
-        await context.addInitScript(privacyScript);
-
-        const page = await context.newPage();
-
-        // Pure JS Wakeup (Focus & Click)
         try {
-            await page.bringToFront();
-            // eslint-disable-next-line no-undef
-            await page.evaluate(() => window.focus());
-            const vp = page.viewportSize() || { height: 1080, width: 1920 };
-            const startX = Math.floor(Math.random() * (vp.width * 0.5));
-            const startY = Math.floor(Math.random() * (vp.height * 0.5));
-            await this._simulateHumanMovement(page, startX, startY);
-            await page.mouse.down();
-            await page.waitForTimeout(100);
-            await page.mouse.up();
-        } catch (e) {
-            this.logger.warn(`[Context#${authIndex}] Wakeup minor error: ${e.message}`);
+            context = await this.browser.newContext({
+                deviceScaleFactor: 1,
+                storageState: storageStateObject,
+                viewport: { height: randomHeight, width: randomWidth },
+                ...(proxyConfig ? { proxy: proxyConfig } : {}),
+            });
+
+            // Inject Privacy Script immediately after context creation
+            const privacyScript = this._getPrivacyProtectionScript(authIndex);
+            await context.addInitScript(privacyScript);
+
+            page = await context.newPage();
+
+            // Pure JS Wakeup (Focus & Click)
+            try {
+                await page.bringToFront();
+                // eslint-disable-next-line no-undef
+                await page.evaluate(() => window.focus());
+                const vp = page.viewportSize() || { height: 1080, width: 1920 };
+                const startX = Math.floor(Math.random() * (vp.width * 0.5));
+                const startY = Math.floor(Math.random() * (vp.height * 0.5));
+                await this._simulateHumanMovement(page, startX, startY);
+                await page.mouse.down();
+                await page.waitForTimeout(100);
+                await page.mouse.up();
+            } catch (e) {
+                this.logger.warn(`[Context#${authIndex}] Wakeup minor error: ${e.message}`);
+            }
+
+            page.on("console", msg => {
+                const msgText = msg.text();
+                if (msgText.includes("Content-Security-Policy")) {
+                    return;
+                }
+                if (msgText.includes("[ProxyClient]")) {
+                    this.logger.info(`[Context#${authIndex}] ${msgText.replace("[ProxyClient] ", "")}`);
+                } else if (msg.type() === "error") {
+                    this.logger.error(`[Context#${authIndex} Page Error] ${msgText}`);
+                }
+            });
+
+            await this._navigateAndWakeUpPage(page, `[Context#${authIndex}]`);
+            await this._checkPageStatusAndErrors(page, `[Context#${authIndex}]`);
+            await this._handlePopups(page, `[Context#${authIndex}]`);
+            await this._injectScriptToEditor(page, buildScriptContent, `[Context#${authIndex}]`);
+
+            // Save to contexts map
+            this.contexts.set(authIndex, {
+                backgroundWakeupRunning: false,
+                context,
+                healthMonitorInterval: null,
+                page,
+            });
+
+            // Update auth file
+            await this._updateAuthFile(authIndex);
+
+            return { context, page };
+        } catch (error) {
+            this.logger.error(`❌ [Browser] Context initialization failed for index ${authIndex}, cleaning up...`);
+            if (context) {
+                try {
+                    await context.close();
+                    this.logger.info(`[Browser] Cleaned up leaked context for index ${authIndex}`);
+                } catch (closeError) {
+                    this.logger.warn(`[Browser] Failed to close context during cleanup: ${closeError.message}`);
+                }
+            }
+            throw error;
         }
-
-        page.on("console", msg => {
-            const msgText = msg.text();
-            if (msgText.includes("Content-Security-Policy")) {
-                return;
-            }
-            if (msgText.includes("[ProxyClient]")) {
-                this.logger.info(`[Context#${authIndex}] ${msgText.replace("[ProxyClient] ", "")}`);
-            } else if (msg.type() === "error") {
-                this.logger.error(`[Context#${authIndex} Page Error] ${msgText}`);
-            }
-        });
-
-        await this._navigateAndWakeUpPage(page, `[Context#${authIndex}]`);
-        await this._checkPageStatusAndErrors(page, `[Context#${authIndex}]`);
-        await this._handlePopups(page, `[Context#${authIndex}]`);
-        await this._injectScriptToEditor(page, buildScriptContent, `[Context#${authIndex}]`);
-
-        // Save to contexts map
-        this.contexts.set(authIndex, {
-            backgroundWakeupRunning: false,
-            context,
-            healthMonitorInterval: null,
-            page,
-        });
-
-        // Update auth file
-        await this._updateAuthFile(authIndex);
-
-        return { context, page };
     }
 
     async launchOrSwitchContext(authIndex) {
@@ -1261,7 +1300,11 @@ class BrowserManager {
                 ...(proxyConfig ? { proxy: proxyConfig } : {}),
             });
             this.browser.on("disconnected", () => {
-                this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
+                if (!this.isClosingIntentionally) {
+                    this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
+                } else {
+                    this.logger.info("[Browser] Main browser closed intentionally.");
+                }
                 this.browser = null;
                 this.contexts.clear();
                 this.context = null;
@@ -1447,6 +1490,56 @@ class BrowserManager {
             );
             await this._saveDebugArtifacts("reconnect_failed", targetAuthIndex);
             return false;
+        }
+    }
+
+    /**
+     * Close a single context for a specific account
+     * @param {number} authIndex - The auth index to close
+     */
+    async closeContext(authIndex) {
+        if (!this.contexts.has(authIndex)) {
+            this.logger.warn(`[Browser] Context #${authIndex} not found, nothing to close.`);
+            return;
+        }
+
+        const contextData = this.contexts.get(authIndex);
+
+        // Stop health monitor for this context
+        if (contextData.healthMonitorInterval) {
+            clearInterval(contextData.healthMonitorInterval);
+            contextData.healthMonitorInterval = null;
+            this.logger.info(`[Browser] Stopped health monitor for context #${authIndex}`);
+        }
+
+        // Remove from contexts map FIRST, before closing context
+        // This ensures that when context.close() triggers WebSocket disconnect,
+        // _removeConnection will see that the context is already gone and skip reconnect logic
+        this.contexts.delete(authIndex);
+
+        // If this was the current context, reset current references
+        if (this._currentAuthIndex === authIndex) {
+            this.context = null;
+            this.page = null;
+            this._currentAuthIndex = -1;
+            this.logger.info(`[Browser] Current context was closed, currentAuthIndex reset to -1.`);
+        }
+
+        // Close the context AFTER removing from map
+        try {
+            if (contextData.context) {
+                await contextData.context.close();
+                this.logger.info(`[Browser] Context #${authIndex} closed.`);
+            }
+        } catch (e) {
+            this.logger.warn(`[Browser] Error closing context #${authIndex}: ${e.message}`);
+        }
+
+        // If this was the last context, close the browser to free resources
+        // This ensures a clean state when all accounts are deleted
+        if (this.contexts.size === 0 && this.browser) {
+            this.logger.info(`[Browser] All contexts closed, closing browser instance...`);
+            await this.closeBrowser();
         }
     }
 

@@ -179,7 +179,7 @@
     "usageCount": "使用次数",
     "versionInfo": "版本信息",
     "viewRelease": "查看版本发布",
-    "warningDeleteCurrentAccount": "您即将删除当前正在使用的账号。浏览器连接将被关闭，您需要切换到其他账号。是否继续？",
+    "warningDeleteCurrentAccount": "您即将删除当前正在使用的账号。删除后将进入无活动账号状态，需要手动切换到其他账号。是否继续？",
     "warningTitle": "警告",
     "zipExtractFailed": "解压失败",
     "zipNoJsonFiles": "压缩包内无 JSON 文件"
