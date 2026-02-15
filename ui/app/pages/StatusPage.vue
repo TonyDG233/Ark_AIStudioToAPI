@@ -1349,7 +1349,7 @@
                     </button>
                 </header>
                 <div class="status-card logs-card">
-                    <pre id="log-container">{{ state.logs }}</pre>
+                    <pre id="log-container" v-html="formattedLogs"></pre>
                 </div>
             </div>
         </main>
@@ -1525,6 +1525,18 @@ const dedupedAvailableCount = computed(() => {
 });
 
 const isBusy = computed(() => state.isSwitchingAccount || state.isSystemBusy);
+
+const formattedLogs = computed(() => {
+    if (!state.logs) return "";
+    // Escape HTML first to prevent XSS (though logs should be safe, better safe than sorry)
+    let safeLogs = escapeHtml(state.logs);
+
+    // Highlight [WARN] and [ERROR] at the start of lines with inline styles
+    safeLogs = safeLogs.replace(/(^|\n)(\[WARN\])/g, '$1<span style="color: #f39c12; font-weight: bold;">$2</span>');
+    safeLogs = safeLogs.replace(/(^|\n)(\[ERROR\])/g, '$1<span style="color: #e74c3c; font-weight: bold;">$2</span>');
+
+    return safeLogs;
+});
 
 // Computed properties for batch selection
 const selectedCount = computed(() => state.selectedAccounts.size);
