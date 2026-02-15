@@ -1427,7 +1427,9 @@ class BrowserManager {
             this.context = null;
             this.page = null;
             this._currentAuthIndex = -1;
-            this.backgroundWakeupRunning = false;
+            // DO NOT reset backgroundWakeupRunning here!
+            // If a BackgroundWakeup was running, it will detect this.page === null and exit on its own.
+            // Resetting the flag here could allow a new instance to start before the old one exits.
 
             throw error;
         }
@@ -1567,8 +1569,9 @@ class BrowserManager {
             this.context = null;
             this.page = null;
             this._currentAuthIndex = -1;
-            this.backgroundWakeupRunning = false; // Reset to allow new BackgroundWakeup to start immediately
-            this.logger.info(`[Browser] Current context was closed, currentAuthIndex reset to -1.`);
+            // DO NOT reset backgroundWakeupRunning here!
+            // If a BackgroundWakeup was running, it will detect this.page === null and exit on its own.
+            // Resetting the flag here could allow a new instance to start before the old one exits.            this.logger.info(`[Browser] Current context was closed, currentAuthIndex reset to -1.`);
         }
 
         // Close the context AFTER removing from map
@@ -1608,7 +1611,9 @@ class BrowserManager {
         this.context = null;
         this.page = null;
         this._currentAuthIndex = -1;
-        this.backgroundWakeupRunning = false;
+        // DO NOT reset backgroundWakeupRunning here!
+        // If a BackgroundWakeup was running, it will detect this.page === null and exit on its own.
+        // Resetting the flag here could allow a new instance to start before the old one exits.
     }
 
     /**
