@@ -117,9 +117,7 @@ class ConnectionRegistry extends EventEmitter {
 
             // Only clear message queues if this is the current account
             if (isCurrentAccount) {
-                this.logger.info("[Server] Current account disconnected, cleaning up all pending requests...");
-                this.messageQueues.forEach(queue => queue.close());
-                this.messageQueues.clear();
+                this.closeAllMessageQueues();
             } else {
                 this.logger.info(
                     `[Server] Non-current account #${disconnectedAuthIndex} disconnected, keeping message queues intact.`
@@ -266,6 +264,24 @@ class ConnectionRegistry extends EventEmitter {
         if (queue) {
             queue.close();
             this.messageQueues.delete(requestId);
+        }
+    }
+
+    /**
+     * Force close all message queues
+     * Used when the active account is deleted/reset and we want to terminate all pending requests immediately
+     */
+    closeAllMessageQueues() {
+        if (this.messageQueues.size > 0) {
+            this.logger.info(`[Registry] Force closing ${this.messageQueues.size} pending message queues...`);
+            this.messageQueues.forEach(queue => {
+                try {
+                    queue.close();
+                } catch (e) {
+                    /* ignore */
+                }
+            });
+            this.messageQueues.clear();
         }
     }
 }

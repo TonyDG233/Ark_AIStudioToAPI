@@ -306,9 +306,11 @@ class StatusRoutes {
                 this.logger.warn(
                     `[WebUI] Current active account #${currentAuthIndex} was deleted. Closing context and connection...`
                 );
-                // Close context first so page is gone when _removeConnection checks
+                // 1. Terminate all pending requests immediately
+                this.serverSystem.connectionRegistry.closeAllMessageQueues();
+                // 2. Close context first so page is gone when _removeConnection checks
                 await this.serverSystem.browserManager.closeContext(currentAuthIndex);
-                // Then close WebSocket connection
+                // 3. Then close WebSocket connection
                 this.serverSystem.connectionRegistry.closeConnectionByAuth(currentAuthIndex);
             }
 
@@ -459,6 +461,12 @@ class StatusRoutes {
 
                 // Always close context first, then connection
                 this.logger.info(`[WebUI] Account #${targetIndex} deleted. Closing context and connection...`);
+
+                if (targetIndex === currentAuthIndex) {
+                    // If deleting the current account, terminate pending requests first
+                    this.serverSystem.connectionRegistry.closeAllMessageQueues();
+                }
+
                 // Close context first so page is gone when _removeConnection checks
                 await this.serverSystem.browserManager.closeContext(targetIndex);
                 // Then close WebSocket connection
