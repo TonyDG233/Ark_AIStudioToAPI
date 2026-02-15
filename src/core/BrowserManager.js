@@ -1356,27 +1356,40 @@ class BrowserManager {
             this.logger.info(`⚡ [FastSwitch] Switching to pre-loaded context for account #${authIndex}`);
             this.logger.info("==================================================");
 
-            // Stop background tasks for old context
-            if (this._currentAuthIndex >= 0 && this.contexts.has(this._currentAuthIndex)) {
-                const oldContextData = this.contexts.get(this._currentAuthIndex);
-                if (oldContextData.healthMonitorInterval) {
-                    clearInterval(oldContextData.healthMonitorInterval);
-                    oldContextData.healthMonitorInterval = null;
-                }
-            }
-
-            // Switch to new context
+            // Validate that the page is still alive before switching
             const contextData = this.contexts.get(authIndex);
-            this.context = contextData.context;
-            this.page = contextData.page;
-            this._currentAuthIndex = authIndex;
+            if (contextData.page.isClosed()) {
+                this.logger.warn(
+                    `[FastSwitch] Page for account #${authIndex} is closed, cleaning up and re-initializing...`
+                );
+                // Clean up the dead context
+                await this.closeContext(authIndex);
+                // Fall through to slow path to re-initialize
+            } else {
+                // Stop background tasks for old context
+                if (this._currentAuthIndex >= 0 && this.contexts.has(this._currentAuthIndex)) {
+                    const oldContextData = this.contexts.get(this._currentAuthIndex);
+                    if (oldContextData.healthMonitorInterval) {
+                        clearInterval(oldContextData.healthMonitorInterval);
+                        oldContextData.healthMonitorInterval = null;
+                    }
+                }
 
-            // Start background tasks for new context
-            this._startHealthMonitor();
-            this._startBackgroundWakeup(); // Internal check prevents duplicate instances
+                // Switch to new context
+                this.context = contextData.context;
+                this.page = contextData.page;
+                this._currentAuthIndex = authIndex;
 
-            this.logger.info(`✅ [FastSwitch] Switched to account #${authIndex} instantly!`);
-            return;
+                // Reset BackgroundWakeup state for new context
+                this.noButtonCount = 0;
+
+                // Start background tasks for new context
+                this._startHealthMonitor();
+                this._startBackgroundWakeup(); // Internal check prevents duplicate instances
+
+                this.logger.info(`✅ [FastSwitch] Switched to account #${authIndex} instantly!`);
+                return;
+            }
         }
 
         // Context doesn't exist, need to initialize it (slow path)
@@ -1401,6 +1414,9 @@ class BrowserManager {
             this.context = context;
             this.page = page;
             this._currentAuthIndex = authIndex;
+
+            // Reset BackgroundWakeup state for new context
+            this.noButtonCount = 0;
 
             // Start background tasks
             this._startHealthMonitor();
@@ -1526,6 +1542,8 @@ class BrowserManager {
 
             // Restart background tasks only if this is the current account
             if (isCurrentAccount) {
+                // Reset BackgroundWakeup state after reconnect
+                this.noButtonCount = 0;
                 this._startHealthMonitor();
                 this._startBackgroundWakeup(); // Internal check prevents duplicate instances
             }
