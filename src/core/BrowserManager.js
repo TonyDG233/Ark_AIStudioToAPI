@@ -114,7 +114,7 @@ class BrowserManager {
      * @param {number} authIndex - The auth index to update
      */
     async _updateAuthFile(authIndex) {
-        // 从多上下文 Map 获取目标账号的 context，避免使用 this.context 导致认证数据串线
+        // Retrieve the target account's context from the multi-context Map to avoid cross-contamination of auth data by using this.context
         const contextData = this.contexts.get(authIndex);
         if (!contextData || !contextData.context) return;
 
@@ -813,7 +813,7 @@ class BrowserManager {
                         // Click active buttons if visible
                         // eslint-disable-next-line no-undef
                         document.querySelectorAll("button").forEach(btn => {
-                            // 检查元素是否占据空间（简单的可见性检查）
+                            // Check if the element occupies space (simple visibility check)
                             const rect = btn.getBoundingClientRect();
                             const isVisible = rect.width > 0 && rect.height > 0;
 
@@ -821,7 +821,7 @@ class BrowserManager {
                                 const text = (btn.innerText || "").trim();
                                 const ariaLabel = btn.getAttribute("aria-label");
 
-                                // 匹配文本 或 aria-label
+                                // Match text or aria-label
                                 if (targetTexts.includes(text) || ariaLabel === "Close") {
                                     console.log(`[ProxyClient] HealthMonitor clicking: ${text || "Close Button"}`);
                                     btn.click();
@@ -855,7 +855,7 @@ class BrowserManager {
      * @param {number} [authIndex] - Optional auth index to get the correct page from contexts Map
      */
     async _saveDebugArtifacts(suffix = "final", authIndex = null) {
-        // 优先从 contexts Map 获取指定账号的 page，回退到 this.page
+        // Prioritize retrieving the page for the specific account from the contexts Map, falling back to this.page
         let targetPage = this.page;
         if (authIndex !== null && this.contexts.has(authIndex)) {
             const ctxData = this.contexts.get(authIndex);
