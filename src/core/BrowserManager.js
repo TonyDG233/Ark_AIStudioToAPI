@@ -24,7 +24,7 @@ class BrowserManager {
         this.browser = null;
 
         // Multi-context architecture: Store all initialized contexts
-        // Map: authIndex -> {context, page, healthMonitorInterval, backgroundWakeupRunning}
+        // Map: authIndex -> {context, page, healthMonitorInterval}
         this.contexts = new Map();
 
         // Legacy single context references (for backward compatibility)
@@ -39,6 +39,10 @@ class BrowserManager {
         // Flag to distinguish intentional close from unexpected disconnect
         // Used by ConnectionRegistry callback to skip unnecessary reconnect attempts
         this.isClosingIntentionally = false;
+
+        // Background wakeup service status (instance-level, tracks this.page)
+        // Prevents multiple BackgroundWakeup instances from running simultaneously
+        this.backgroundWakeupRunning = false;
 
         // Added for background wakeup logic from new core
         this.noButtonCount = 0;
@@ -885,18 +889,35 @@ class BrowserManager {
     /**
      * Feature: Background Wakeup & "Launch" Button Handler
      * Specifically handles the "Rocket/Launch" button which blocks model loading.
+     * This service is bound to this.page (instance-level), not individual contexts.
+     * Only one instance should run at a time, tracking the current active page.
      */
     async _startBackgroundWakeup() {
-        const currentPage = this.page;
-        // Initial buffer
+        // Prevent multiple instances from running simultaneously
+        if (this.backgroundWakeupRunning) {
+            this.logger.debug("[Browser] BackgroundWakeup already running, skipping duplicate start.");
+            return;
+        }
+
+        this.backgroundWakeupRunning = true;
+
+        // Initial buffer - wait before starting the main loop to let page stabilize
         await new Promise(r => setTimeout(r, 1500));
 
-        if (!currentPage || currentPage.isClosed() || this.page !== currentPage) return;
+        // Verify page is still valid after the initial delay
+        if (!this.page || this.page.isClosed()) {
+            this.backgroundWakeupRunning = false;
+            this.logger.info("[Browser] BackgroundWakeup stopped: page became null or closed during startup delay.");
+            return;
+        }
 
         this.logger.info("[Browser] 🛡️ Background Wakeup Service (Rocket Handler) started...");
 
-        while (currentPage && !currentPage.isClosed() && this.page === currentPage) {
+        // Main loop: directly use this.page, automatically follows context switches
+        while (this.page && !this.page.isClosed()) {
             try {
+                const currentPage = this.page; // Capture for this iteration
+
                 // 1. Force page wake-up
                 await currentPage.bringToFront().catch(() => {});
 
@@ -1038,6 +1059,18 @@ class BrowserManager {
                 await new Promise(r => setTimeout(r, 1000));
             }
         }
+
+        // Reset flag when loop exits
+        this.backgroundWakeupRunning = false;
+
+        // Log the reason for stopping
+        if (!this.page) {
+            this.logger.info("[Browser] Background Wakeup Service stopped: this.page is null.");
+        } else if (this.page.isClosed()) {
+            this.logger.info("[Browser] Background Wakeup Service stopped: this.page was closed.");
+        } else {
+            this.logger.info("[Browser] Background Wakeup Service stopped: unknown reason.");
+        }
     }
 
     async launchBrowserForVNC(extraArgs = {}) {
@@ -1122,11 +1155,9 @@ class BrowserManager {
                 } else {
                     this.logger.info("[Browser] Main browser closed intentionally.");
                 }
+
                 this.browser = null;
-                this.contexts.clear();
-                this.context = null;
-                this.page = null;
-                this._currentAuthIndex = -1;
+                this._cleanupAllContexts();
             });
             this.logger.info("✅ [Browser] Main browser instance launched successfully.");
         }
@@ -1244,7 +1275,6 @@ class BrowserManager {
 
             // Save to contexts map
             this.contexts.set(authIndex, {
-                backgroundWakeupRunning: false,
                 context,
                 healthMonitorInterval: null,
                 page,
@@ -1256,6 +1286,14 @@ class BrowserManager {
             return { context, page };
         } catch (error) {
             this.logger.error(`❌ [Browser] Context initialization failed for index ${authIndex}, cleaning up...`);
+
+            // Remove from contexts map if it was added
+            if (this.contexts.has(authIndex)) {
+                this.contexts.delete(authIndex);
+                this.logger.info(`[Browser] Removed failed context #${authIndex} from contexts map`);
+            }
+
+            // Close context if it was created
             if (context) {
                 try {
                     await context.close();
@@ -1305,11 +1343,9 @@ class BrowserManager {
                 } else {
                     this.logger.info("[Browser] Main browser closed intentionally.");
                 }
+
                 this.browser = null;
-                this.contexts.clear();
-                this.context = null;
-                this.page = null;
-                this._currentAuthIndex = -1;
+                this._cleanupAllContexts();
             });
             this.logger.info("✅ [Browser] Main browser instance successfully launched.");
         }
@@ -1337,10 +1373,7 @@ class BrowserManager {
 
             // Start background tasks for new context
             this._startHealthMonitor();
-            if (!contextData.backgroundWakeupRunning) {
-                this._startBackgroundWakeup();
-                contextData.backgroundWakeupRunning = true;
-            }
+            this._startBackgroundWakeup(); // Internal check prevents duplicate instances
 
             this.logger.info(`✅ [FastSwitch] Switched to account #${authIndex} instantly!`);
             return;
@@ -1371,11 +1404,7 @@ class BrowserManager {
 
             // Start background tasks
             this._startHealthMonitor();
-            this._startBackgroundWakeup();
-            const contextData = this.contexts.get(authIndex);
-            if (contextData) {
-                contextData.backgroundWakeupRunning = true;
-            }
+            this._startBackgroundWakeup(); // Internal check prevents duplicate instances
 
             this.logger.info("==================================================");
             this.logger.info(`✅ [Browser] Account ${authIndex} context initialized successfully!`);
@@ -1384,7 +1413,22 @@ class BrowserManager {
         } catch (error) {
             this.logger.error(`❌ [Browser] Account ${authIndex} context initialization failed: ${error.message}`);
             await this._saveDebugArtifacts("init_failed", authIndex);
+
+            // Clean up if HealthMonitor was started
+            if (this.contexts.has(authIndex)) {
+                const contextData = this.contexts.get(authIndex);
+                if (contextData.healthMonitorInterval) {
+                    clearInterval(contextData.healthMonitorInterval);
+                    this.logger.info(`[Browser] Cleaned up health monitor for failed context #${authIndex}`);
+                }
+            }
+
+            // Reset state
+            this.context = null;
+            this.page = null;
             this._currentAuthIndex = -1;
+            this.backgroundWakeupRunning = false;
+
             throw error;
         }
     }
@@ -1481,6 +1525,7 @@ class BrowserManager {
             // Restart background tasks only if this is the current account
             if (isCurrentAccount) {
                 this._startHealthMonitor();
+                this._startBackgroundWakeup(); // Internal check prevents duplicate instances
             }
 
             return true;
@@ -1522,6 +1567,7 @@ class BrowserManager {
             this.context = null;
             this.page = null;
             this._currentAuthIndex = -1;
+            this.backgroundWakeupRunning = false; // Reset to allow new BackgroundWakeup to start immediately
             this.logger.info(`[Browser] Current context was closed, currentAuthIndex reset to -1.`);
         }
 
@@ -1544,15 +1590,10 @@ class BrowserManager {
     }
 
     /**
-     * Unified cleanup method for the main browser instance.
-     * Handles intervals, timeouts, and resetting all references.
-     * In multi-context mode, cleans up all contexts.
+     * Helper: Clean up all context resources (health monitors, etc.)
+     * Called when browser is closing or has disconnected
      */
-    async closeBrowser() {
-        // Set flag to indicate intentional close - prevents ConnectionRegistry from
-        // attempting lightweight reconnect when WebSocket disconnects
-        this.isClosingIntentionally = true;
-
+    _cleanupAllContexts() {
         // Clean up all context health monitors
         for (const [authIndex, contextData] of this.contexts.entries()) {
             if (contextData.healthMonitorInterval) {
@@ -1561,6 +1602,24 @@ class BrowserManager {
                 this.logger.info(`[Browser] Stopped health monitor for context #${authIndex}`);
             }
         }
+
+        // Reset all references
+        this.contexts.clear();
+        this.context = null;
+        this.page = null;
+        this._currentAuthIndex = -1;
+        this.backgroundWakeupRunning = false;
+    }
+
+    /**
+     * Unified cleanup method for the main browser instance.
+     * Handles intervals, timeouts, and resetting all references.
+     * In multi-context mode, cleans up all contexts.
+     */
+    async closeBrowser() {
+        // Set flag to indicate intentional close - prevents ConnectionRegistry from
+        // attempting lightweight reconnect when WebSocket disconnects
+        this.isClosingIntentionally = true;
 
         // Legacy single health monitor cleanup (for backward compatibility)
         if (this.healthMonitorInterval) {
@@ -1577,12 +1636,8 @@ class BrowserManager {
                 this.logger.warn(`[Browser] Error during close (ignored): ${e.message}`);
             }
 
-            // Reset all references
             this.browser = null;
-            this.contexts.clear();
-            this.context = null;
-            this.page = null;
-            this._currentAuthIndex = -1;
+            this._cleanupAllContexts();
             this.logger.info("[Browser] Main browser instance and all contexts closed, currentAuthIndex reset to -1.");
         }
 

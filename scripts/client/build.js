@@ -101,6 +101,15 @@ class ConnectionManager extends EventTarget {
     // This line is dynamically replaced by BrowserManager.js based on WS_PORT environment variable.
     constructor(endpoint = "ws://127.0.0.1:9998", authIndex = -1) {
         super();
+
+        // Validate authIndex: must be >= 0 for multi-context architecture
+        if (typeof authIndex !== "number" || authIndex < 0) {
+            const errorMsg = `❌ FATAL: Invalid authIndex (${authIndex}). BrowserManager failed to inject authIndex correctly. This is a configuration error.`;
+            console.error(errorMsg);
+            alert(errorMsg);
+            throw new Error(errorMsg);
+        }
+
         this.endpoint = endpoint;
         this.authIndex = authIndex;
         this.socket = null;
