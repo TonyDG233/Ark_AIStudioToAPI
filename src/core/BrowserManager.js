@@ -1366,29 +1366,58 @@ class BrowserManager {
                 await this.closeContext(authIndex);
                 // Fall through to slow path to re-initialize
             } else {
-                // Stop background tasks for old context
-                if (this._currentAuthIndex >= 0 && this.contexts.has(this._currentAuthIndex)) {
-                    const oldContextData = this.contexts.get(this._currentAuthIndex);
-                    if (oldContextData.healthMonitorInterval) {
-                        clearInterval(oldContextData.healthMonitorInterval);
-                        oldContextData.healthMonitorInterval = null;
+                // Quick auth status check without navigation
+                try {
+                    const currentUrl = contextData.page.url();
+                    const pageTitle = await contextData.page.title();
+
+                    // Check if redirected to login page (auth expired)
+                    if (
+                        currentUrl.includes("accounts.google.com") ||
+                        currentUrl.includes("ServiceLogin") ||
+                        pageTitle.includes("Sign in") ||
+                        pageTitle.includes("登录")
+                    ) {
+                        this.logger.warn(
+                            `[FastSwitch] Account #${authIndex} auth expired (redirected to login), cleaning up and re-initializing...`
+                        );
+                        // Clean up the expired context
+                        await this.closeContext(authIndex);
+                        // Fall through to slow path to re-initialize
+                    } else {
+                        // Page is alive and auth is valid, proceed with fast switch
+                        // Stop background tasks for old context
+                        if (this._currentAuthIndex >= 0 && this.contexts.has(this._currentAuthIndex)) {
+                            const oldContextData = this.contexts.get(this._currentAuthIndex);
+                            if (oldContextData.healthMonitorInterval) {
+                                clearInterval(oldContextData.healthMonitorInterval);
+                                oldContextData.healthMonitorInterval = null;
+                            }
+                        }
+
+                        // Switch to new context
+                        this.context = contextData.context;
+                        this.page = contextData.page;
+                        this._currentAuthIndex = authIndex;
+
+                        // Reset BackgroundWakeup state for new context
+                        this.noButtonCount = 0;
+
+                        // Start background tasks for new context
+                        this._startHealthMonitor();
+                        this._startBackgroundWakeup(); // Internal check prevents duplicate instances
+
+                        this.logger.info(`✅ [FastSwitch] Switched to account #${authIndex} instantly!`);
+                        return;
                     }
+                } catch (error) {
+                    this.logger.warn(
+                        `[FastSwitch] Failed to check auth status for account #${authIndex}: ${error.message}, cleaning up and re-initializing...`
+                    );
+                    // Clean up the problematic context
+                    await this.closeContext(authIndex);
+                    // Fall through to slow path to re-initialize
                 }
-
-                // Switch to new context
-                this.context = contextData.context;
-                this.page = contextData.page;
-                this._currentAuthIndex = authIndex;
-
-                // Reset BackgroundWakeup state for new context
-                this.noButtonCount = 0;
-
-                // Start background tasks for new context
-                this._startHealthMonitor();
-                this._startBackgroundWakeup(); // Internal check prevents duplicate instances
-
-                this.logger.info(`✅ [FastSwitch] Switched to account #${authIndex} instantly!`);
-                return;
             }
         }
 
