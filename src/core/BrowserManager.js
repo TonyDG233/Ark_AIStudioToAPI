@@ -425,7 +425,6 @@ class BrowserManager {
         }
         if (!authIndexInjected) {
             const message = "[Config] Failed to inject authIndex into ProxySystem initialization in build.js";
-            this.logger.error("[Config] Failed to inject authIndex into ProxySystem initialization in build.js");
             throw new Error(message);
         }
 
@@ -749,6 +748,13 @@ class BrowserManager {
         // Run every 4 seconds
         contextData.healthMonitorInterval = setInterval(async () => {
             try {
+                // Check if this is still the current active account
+                // This prevents background contexts from running healthMonitor unnecessarily
+                if (this._currentAuthIndex !== authIndex) {
+                    // Silently skip - this context is not active
+                    return;
+                }
+
                 const page = contextData.page;
                 // Double check page status
                 if (!page || page.isClosed()) {
@@ -902,19 +908,28 @@ class BrowserManager {
     async _startBackgroundWakeup() {
         // Prevent multiple instances from running simultaneously
         if (this.backgroundWakeupRunning) {
-            this.logger.debug("[Browser] BackgroundWakeup already running, skipping duplicate start.");
+            this.logger.info("[Browser] BackgroundWakeup already running, skipping duplicate start.");
             return;
         }
 
+        this.logger.info("[Browser] Starting BackgroundWakeup initialization...");
         this.backgroundWakeupRunning = true;
 
         // Initial buffer - wait before starting the main loop to let page stabilize
         await new Promise(r => setTimeout(r, 1500));
 
         // Verify page is still valid after the initial delay
-        if (!this.page || this.page.isClosed()) {
+        try {
+            if (!this.page || this.page.isClosed()) {
+                this.backgroundWakeupRunning = false;
+                this.logger.info(
+                    "[Browser] BackgroundWakeup stopped: page became null or closed during startup delay."
+                );
+                return;
+            }
+        } catch (error) {
             this.backgroundWakeupRunning = false;
-            this.logger.info("[Browser] BackgroundWakeup stopped: page became null or closed during startup delay.");
+            this.logger.warn(`[Browser] BackgroundWakeup stopped: error checking page status: ${error.message}`);
             return;
         }
 
@@ -1046,7 +1061,14 @@ class BrowserManager {
                         await new Promise(r => setTimeout(r, 2000));
                     } else {
                         this.logger.info(`[Browser] ✅ Click successful, button disappeared.`);
-                        await new Promise(r => setTimeout(r, 60000)); // Long sleep on success
+                        // Long sleep on success, but check for context switches every second
+                        for (let i = 0; i < 60; i++) {
+                            if (this.noButtonCount === 0) {
+                                this.logger.info(`[Browser] ⚡ Woken up early due to user activity or context switch.`);
+                                break; // Wake up early if user activity detected
+                            }
+                            await new Promise(r => setTimeout(r, 1000));
+                        }
                     }
                 } else {
                     this.noButtonCount++;
@@ -1429,6 +1451,13 @@ class BrowserManager {
                         // Start background tasks for new context
                         this._startHealthMonitor();
                         this._startBackgroundWakeup(); // Internal check prevents duplicate instances
+
+                        // Optimize UX: Force page to front immediately
+                        try {
+                            await this.page.bringToFront();
+                        } catch (ignored) {
+                            /* ignore error if page is busy */
+                        }
 
                         this.logger.info(`✅ [FastSwitch] Switched to account #${authIndex} instantly!`);
                         return;
