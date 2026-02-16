@@ -34,39 +34,59 @@ class ConnectionRegistry extends EventEmitter {
     }
 
     addConnection(websocket, clientInfo) {
-        // Clear grace timer for this specific authIndex only, without affecting other accounts
-        const incomingAuthIndex = clientInfo.authIndex;
-        if (
-            incomingAuthIndex !== undefined &&
-            incomingAuthIndex >= 0 &&
-            this.reconnectGraceTimers.has(incomingAuthIndex)
-        ) {
-            clearTimeout(this.reconnectGraceTimers.get(incomingAuthIndex));
-            this.reconnectGraceTimers.delete(incomingAuthIndex);
-            this.logger.info(`[Server] Grace timer cleared for reconnected authIndex=${incomingAuthIndex}`);
+        const authIndex = clientInfo.authIndex;
+
+        // Validate authIndex: must be a valid non-negative integer
+        if (authIndex === undefined || authIndex < 0 || !Number.isInteger(authIndex)) {
+            this.logger.error(
+                `[Server] Rejecting connection with invalid authIndex: ${authIndex}. Connection will be closed.`
+            );
+            try {
+                websocket.close(1008, "Invalid authIndex");
+            } catch (e) {
+                /* ignore */
+            }
+            return;
+        }
+
+        // Check if there's already a connection for this authIndex
+        const existingConnection = this.connectionsByAuth.get(authIndex);
+        if (existingConnection && existingConnection !== websocket) {
+            this.logger.warn(
+                `[Server] Duplicate connection detected for authIndex=${authIndex}, closing old connection...`
+            );
+            try {
+                // Remove event listeners to prevent them from firing during close
+                existingConnection.removeAllListeners();
+                existingConnection.close(1000, "Replaced by new connection");
+            } catch (e) {
+                this.logger.warn(`[Server] Error closing old connection: ${e.message}`);
+            }
+        }
+
+        // Clear grace timer for this authIndex
+        if (this.reconnectGraceTimers.has(authIndex)) {
+            clearTimeout(this.reconnectGraceTimers.get(authIndex));
+            this.reconnectGraceTimers.delete(authIndex);
+            this.logger.info(`[Server] Grace timer cleared for reconnected authIndex=${authIndex}`);
 
             // Clear message queues for reconnected current account
             // When WebSocket disconnects, browser aborts all in-flight requests
             // Keeping these queues would cause them to hang until timeout
             const currentAuthIndex = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
-            if (incomingAuthIndex === currentAuthIndex && this.messageQueues.size > 0) {
+            if (authIndex === currentAuthIndex && this.messageQueues.size > 0) {
                 this.logger.info(
-                    `[Server] Reconnected current account #${incomingAuthIndex}, clearing ${this.messageQueues.size} stale message queues...`
+                    `[Server] Reconnected current account #${authIndex}, clearing ${this.messageQueues.size} stale message queues...`
                 );
                 this.closeAllMessageQueues();
             }
         }
 
-        // Store connection by authIndex if provided
-        const authIndex = clientInfo.authIndex;
-        if (authIndex !== undefined && authIndex >= 0) {
-            this.connectionsByAuth.set(authIndex, websocket);
-            this.logger.info(
-                `[Server] Internal WebSocket client connected (from: ${clientInfo.address}, authIndex: ${authIndex})`
-            );
-        } else {
-            this.logger.info(`[Server] Internal WebSocket client connected (from: ${clientInfo.address})`);
-        }
+        // Store connection by authIndex
+        this.connectionsByAuth.set(authIndex, websocket);
+        this.logger.info(
+            `[Server] Internal WebSocket client connected (from: ${clientInfo.address}, authIndex: ${authIndex})`
+        );
 
         // Store authIndex on websocket for cleanup
         websocket._authIndex = authIndex;

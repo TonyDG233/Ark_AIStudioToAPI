@@ -1134,7 +1134,7 @@ class BrowserManager {
 
     /**
      * Preload all available auth contexts at startup
-     * This method initializes all contexts in parallel and keeps them ready for instant switching
+     * This method initializes all contexts in sequentially (one by one) and keeps them ready for instant switching
      * @returns {Promise<{successful: number[], failed: Array<{index: number, error: string}>}>}
      */
     async preloadAllContexts() {
