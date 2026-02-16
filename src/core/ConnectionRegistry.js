@@ -69,23 +69,26 @@ class ConnectionRegistry extends EventEmitter {
             clearTimeout(this.reconnectGraceTimers.get(authIndex));
             this.reconnectGraceTimers.delete(authIndex);
             this.logger.info(`[Server] Grace timer cleared for reconnected authIndex=${authIndex}`);
-
-            // Clear message queues for reconnected current account
-            // When WebSocket disconnects, browser aborts all in-flight requests
-            // Keeping these queues would cause them to hang until timeout
-            const currentAuthIndex = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
-            if (authIndex === currentAuthIndex && this.messageQueues.size > 0) {
-                this.logger.info(
-                    `[Server] Reconnected current account #${authIndex}, clearing ${this.messageQueues.size} stale message queues...`
-                );
-                this.closeAllMessageQueues();
-            }
         }
 
         // Clear reconnecting status for this authIndex when connection is re-established
         if (this.reconnectingAccounts.has(authIndex)) {
             this.reconnectingAccounts.delete(authIndex);
             this.logger.info(`[Server] Cleared reconnecting status for reconnected authIndex=${authIndex}`);
+        }
+
+        // Clear message queues for reconnected current account
+        // IMPORTANT: This must be done regardless of whether grace timer existed
+        // Scenario: If WebSocket reconnects after grace period timeout (>5s),
+        // grace timer is already deleted, but new message queues may have been created
+        // When WebSocket disconnects, browser aborts all in-flight requests
+        // Keeping these queues would cause them to hang until timeout
+        const currentAuthIndex = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
+        if (authIndex === currentAuthIndex && this.messageQueues.size > 0) {
+            this.logger.info(
+                `[Server] Reconnected current account #${authIndex}, clearing ${this.messageQueues.size} stale message queues...`
+            );
+            this.closeAllMessageQueues();
         }
 
         // Store connection by authIndex
@@ -269,6 +272,15 @@ class ConnectionRegistry extends EventEmitter {
 
     /**
      * Close WebSocket connection for a specific account
+     *
+     * IMPORTANT: When deleting an account, always call BrowserManager.closeContext() BEFORE this method
+     * Calling order: closeContext() -> closeConnectionByAuth()
+     *
+     * Reason: closeContext() removes the context from the contexts Map before closing it.
+     * When this method closes the WebSocket, _removeConnection() will check if the context exists.
+     * If context is already removed, _removeConnection() skips reconnect logic (which is desired for deletion).
+     * If you call this method first, _removeConnection() may trigger unnecessary reconnect attempts.
+     *
      * @param {number} authIndex - The auth index to close connection for
      */
     closeConnectionByAuth(authIndex) {

@@ -1641,6 +1641,16 @@ class BrowserManager {
 
     /**
      * Close a single context for a specific account
+     *
+     * IMPORTANT: When deleting an account, always call this method BEFORE closeConnectionByAuth()
+     * Calling order: closeContext() -> closeConnectionByAuth()
+     *
+     * Reason: This method removes the context from the contexts Map BEFORE closing it.
+     * When context.close() triggers WebSocket disconnect, ConnectionRegistry._removeConnection()
+     * will check if the context still exists. If not found, it skips reconnect logic.
+     * If you call closeConnectionByAuth() first, _removeConnection() will see the context
+     * still exists and may trigger unnecessary reconnect attempts.
+     *
      * @param {number} authIndex - The auth index to close
      */
     async closeContext(authIndex) {
