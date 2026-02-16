@@ -87,13 +87,25 @@ class RequestHandler {
         const checkInterval = 200; // Check every 200ms
 
         while (Date.now() - startTime < timeoutMs) {
-            if (this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
+            const connection = this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex);
+            // Check both existence and readyState (1 = OPEN)
+            if (connection && connection.readyState === 1) {
                 return true;
             }
             await new Promise(resolve => setTimeout(resolve, checkInterval));
         }
 
-        this.logger.warn(`[Request] Timeout waiting for WebSocket connection for account #${this.currentAuthIndex}`);
+        this.logger.warn(
+            `[Request] Timeout waiting for WebSocket connection for account #${this.currentAuthIndex}. Closing unresponsive context...`
+        );
+        // Proactively close the unresponsive context so subsequent attempts re-initialize it
+        if (this.browserManager) {
+            try {
+                await this.browserManager.closeContext(this.currentAuthIndex);
+            } catch (e) {
+                /* ignore */
+            }
+        }
         return false;
     }
 
