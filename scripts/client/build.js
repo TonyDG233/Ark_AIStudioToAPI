@@ -103,10 +103,9 @@ class ConnectionManager extends EventTarget {
         super();
 
         // Validate authIndex: must be >= 0 for multi-context architecture
-        if (typeof authIndex !== "number" || authIndex < 0) {
+        if (!Number.isInteger(authIndex) || authIndex < 0) {
             const errorMsg = `❌ FATAL: Invalid authIndex (${authIndex}). BrowserManager failed to inject authIndex correctly. This is a configuration error.`;
             console.error(errorMsg);
-            alert(errorMsg);
             throw new Error(errorMsg);
         }
 

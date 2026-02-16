@@ -552,6 +552,15 @@ class ProxyServerSystem extends EventEmitter {
                 const authIndexParam = url.searchParams.get("authIndex");
                 const authIndex = authIndexParam !== null ? parseInt(authIndexParam, 10) : -1;
 
+                // Validate authIndex: must be a valid non-negative integer
+                if (Number.isNaN(authIndex) || authIndex < 0) {
+                    this.logger.error(
+                        `[System] Rejecting WebSocket connection with invalid authIndex: ${authIndexParam} (parsed as ${authIndex})`
+                    );
+                    ws.close(1008, "Invalid authIndex: must be a non-negative integer");
+                    return;
+                }
+
                 this.connectionRegistry.addConnection(ws, {
                     address: req.socket.remoteAddress,
                     authIndex,

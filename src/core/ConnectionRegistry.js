@@ -44,6 +44,17 @@ class ConnectionRegistry extends EventEmitter {
             clearTimeout(this.reconnectGraceTimers.get(incomingAuthIndex));
             this.reconnectGraceTimers.delete(incomingAuthIndex);
             this.logger.info(`[Server] Grace timer cleared for reconnected authIndex=${incomingAuthIndex}`);
+
+            // Clear message queues for reconnected current account
+            // When WebSocket disconnects, browser aborts all in-flight requests
+            // Keeping these queues would cause them to hang until timeout
+            const currentAuthIndex = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
+            if (incomingAuthIndex === currentAuthIndex && this.messageQueues.size > 0) {
+                this.logger.info(
+                    `[Server] Reconnected current account #${incomingAuthIndex}, clearing ${this.messageQueues.size} stale message queues...`
+                );
+                this.closeAllMessageQueues();
+            }
         }
 
         // Store connection by authIndex if provided
@@ -77,11 +88,14 @@ class ConnectionRegistry extends EventEmitter {
             this.logger.info(`[Server] Internal WebSocket client disconnected (authIndex: ${disconnectedAuthIndex}).`);
         } else {
             this.logger.info("[Server] Internal WebSocket client disconnected.");
+            // Early return for invalid authIndex - no reconnect logic needed
+            this.emit("connectionRemoved", websocket);
+            return;
         }
 
         // Check if the page still exists for this account
         // If page is closed/missing, it means the context was intentionally closed, skip reconnect
-        if (disconnectedAuthIndex !== undefined && disconnectedAuthIndex >= 0 && this.browserManager) {
+        if (this.browserManager) {
             const contextData = this.browserManager.contexts.get(disconnectedAuthIndex);
             if (!contextData || !contextData.page || contextData.page.isClosed()) {
                 this.logger.info(
@@ -92,16 +106,13 @@ class ConnectionRegistry extends EventEmitter {
                     clearTimeout(this.reconnectGraceTimers.get(disconnectedAuthIndex));
                     this.reconnectGraceTimers.delete(disconnectedAuthIndex);
                 }
+                this.emit("connectionRemoved", websocket);
                 return;
             }
         }
 
         // Clear any existing grace timer for THIS account before starting a new one
-        if (
-            disconnectedAuthIndex !== undefined &&
-            disconnectedAuthIndex >= 0 &&
-            this.reconnectGraceTimers.has(disconnectedAuthIndex)
-        ) {
+        if (this.reconnectGraceTimers.has(disconnectedAuthIndex)) {
             clearTimeout(this.reconnectGraceTimers.get(disconnectedAuthIndex));
         }
 

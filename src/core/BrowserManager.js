@@ -412,14 +412,21 @@ class BrowserManager {
         }
 
         // Inject authIndex into ProxySystem initialization
+        let authIndexInjected = false;
         const lines = buildScriptContent.split("\n");
         for (let i = 0; i < lines.length; i++) {
             if (lines[i].includes("const proxySystem = new ProxySystem()")) {
                 lines[i] = `    const proxySystem = new ProxySystem(undefined, ${authIndex});`;
                 this.logger.debug(`[Config] Injected authIndex ${authIndex} into ProxySystem initialization`);
                 buildScriptContent = lines.join("\n");
+                authIndexInjected = true;
                 break;
             }
+        }
+        if (!authIndexInjected) {
+            const message = "[Config] Failed to inject authIndex into ProxySystem initialization in build.js";
+            this.logger.error("[Config] Failed to inject authIndex into ProxySystem initialization in build.js");
+            throw new Error(message);
         }
 
         return buildScriptContent;
