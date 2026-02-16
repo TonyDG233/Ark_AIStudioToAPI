@@ -82,6 +82,12 @@ class ConnectionRegistry extends EventEmitter {
             }
         }
 
+        // Clear reconnecting status for this authIndex when connection is re-established
+        if (this.reconnectingAccounts.has(authIndex)) {
+            this.reconnectingAccounts.delete(authIndex);
+            this.logger.info(`[Server] Cleared reconnecting status for reconnected authIndex=${authIndex}`);
+        }
+
         // Store connection by authIndex
         this.connectionsByAuth.set(authIndex, websocket);
         this.logger.info(
@@ -125,6 +131,10 @@ class ConnectionRegistry extends EventEmitter {
                 if (this.reconnectGraceTimers.has(disconnectedAuthIndex)) {
                     clearTimeout(this.reconnectGraceTimers.get(disconnectedAuthIndex));
                     this.reconnectGraceTimers.delete(disconnectedAuthIndex);
+                }
+                // Clear reconnecting status
+                if (this.reconnectingAccounts.has(disconnectedAuthIndex)) {
+                    this.reconnectingAccounts.delete(disconnectedAuthIndex);
                 }
                 this.emit("connectionRemoved", websocket);
                 return;
@@ -188,8 +198,6 @@ class ConnectionRegistry extends EventEmitter {
                 }
             }
 
-            this.emit("connectionLost");
-
             this.reconnectGraceTimers.delete(disconnectedAuthIndex);
         }, 5000);
 
@@ -236,8 +244,9 @@ class ConnectionRegistry extends EventEmitter {
     }
 
     isReconnectingInProgress() {
-        // Check if any account is currently reconnecting
-        return this.reconnectingAccounts.size > 0;
+        // Only check if current account is reconnecting, to avoid non-current account reconnection affecting current account's request handling
+        const currentAuthIndex = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
+        return currentAuthIndex >= 0 && (this.reconnectingAccounts.get(currentAuthIndex) || false);
     }
 
     isInGracePeriod() {
@@ -278,6 +287,12 @@ class ConnectionRegistry extends EventEmitter {
             if (this.reconnectGraceTimers.has(authIndex)) {
                 clearTimeout(this.reconnectGraceTimers.get(authIndex));
                 this.reconnectGraceTimers.delete(authIndex);
+            }
+
+            // Clear reconnecting status for this account
+            if (this.reconnectingAccounts.has(authIndex)) {
+                this.reconnectingAccounts.delete(authIndex);
+                this.logger.info(`[Registry] Cleared reconnecting status for authIndex=${authIndex}`);
             }
         } else {
             this.logger.debug(`[Registry] No WebSocket connection to close for authIndex=${authIndex}`);
