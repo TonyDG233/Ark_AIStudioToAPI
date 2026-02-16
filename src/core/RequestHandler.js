@@ -190,11 +190,20 @@ class RequestHandler {
             return true;
         }
 
-        this.logger.error(
-            "❌ [System] Browser WebSocket connection disconnected! Possible process crash. Attempting recovery..."
-        );
-
+        // Determine if this is first-time startup or actual crash recovery
         const recoveryAuthIndex = this.currentAuthIndex;
+        const isFirstTimeStartup = recoveryAuthIndex < 0 && !this.browserManager.browser;
+
+        if (isFirstTimeStartup) {
+            this.logger.info(
+                "🚀 [System] Browser not yet started. Initializing browser with first available account..."
+            );
+        } else {
+            this.logger.error(
+                "❌ [System] Browser WebSocket connection disconnected! Possible process crash. Attempting recovery..."
+            );
+        }
+
         let wasDirectRecovery = false;
         let recoverySuccess = false;
 
@@ -217,7 +226,6 @@ class RequestHandler {
                 this.logger.info("✅ [System] WebSocket connection is ready!");
                 recoverySuccess = true;
             } else if (this.authSource.getRotationIndices().length > 0) {
-                this.logger.warn("⚠️ [System] No current account, attempting to switch to first available account...");
                 // Don't set isSystemBusy here - let switchToNextAuth manage it
                 const result = await this.authSwitcher.switchToNextAuth();
                 if (!result.success) {
