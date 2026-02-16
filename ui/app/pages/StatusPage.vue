@@ -1532,8 +1532,14 @@ const formattedLogs = computed(() => {
     let safeLogs = escapeHtml(state.logs);
 
     // Highlight [WARN] and [ERROR] at the start of lines with inline styles
-    safeLogs = safeLogs.replace(/(^|\n)(\[WARN\])/g, '$1<span style="color: #f39c12; font-weight: bold;">$2</span>');
-    safeLogs = safeLogs.replace(/(^|\n)(\[ERROR\])/g, '$1<span style="color: #e74c3c; font-weight: bold;">$2</span>');
+    safeLogs = safeLogs.replace(
+        /(^|\r?\n)(\[WARN\])(?=\s)/g,
+        '$1<span style="color: #f39c12; font-weight: bold;">$2</span>'
+    );
+    safeLogs = safeLogs.replace(
+        /(^|\r?\n)(\[ERROR\])(?=\s)/g,
+        '$1<span style="color: #e74c3c; font-weight: bold;">$2</span>'
+    );
 
     return safeLogs;
 });
