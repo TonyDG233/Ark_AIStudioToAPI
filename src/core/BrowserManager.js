@@ -1135,73 +1135,89 @@ class BrowserManager {
         this.logger.info("🚀 [MultiContext] Starting preload of all auth contexts...");
         this.logger.info("==================================================");
 
-        // Launch browser if not already running
-        const proxyConfig = parseProxyFromEnv();
-        if (!this.browser) {
-            this.logger.info("🚀 [Browser] Launching main browser instance...");
-            if (!fs.existsSync(this.browserExecutablePath)) {
-                throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
-            }
-            this.browser = await firefox.launch({
-                args: this.launchArgs,
-                executablePath: this.browserExecutablePath,
-                firefoxUserPrefs: this.firefoxUserPrefs,
-                headless: true,
-                ...(proxyConfig ? { proxy: proxyConfig } : {}),
-            });
-            this.browser.on("disconnected", () => {
-                if (!this.isClosingIntentionally) {
-                    this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
-                } else {
-                    this.logger.info("[Browser] Main browser closed intentionally.");
+        try {
+            // Launch browser if not already running
+            const proxyConfig = parseProxyFromEnv();
+            if (!this.browser) {
+                this.logger.info("🚀 [Browser] Launching main browser instance...");
+                if (!fs.existsSync(this.browserExecutablePath)) {
+                    throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
                 }
+                this.browser = await firefox.launch({
+                    args: this.launchArgs,
+                    executablePath: this.browserExecutablePath,
+                    firefoxUserPrefs: this.firefoxUserPrefs,
+                    headless: true,
+                    ...(proxyConfig ? { proxy: proxyConfig } : {}),
+                });
+                this.browser.on("disconnected", () => {
+                    if (!this.isClosingIntentionally) {
+                        this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
+                    } else {
+                        this.logger.info("[Browser] Main browser closed intentionally.");
+                    }
 
-                this.browser = null;
-                this._cleanupAllContexts();
-            });
-            this.logger.info("✅ [Browser] Main browser instance launched successfully.");
-        }
-
-        // Get all available auth indices
-        const allAuthIndices = this.authSource.availableIndices;
-        if (allAuthIndices.length === 0) {
-            this.logger.warn("[MultiContext] No auth files found, skipping preload.");
-            return { failed: [], successful: [] };
-        }
-
-        this.logger.info(
-            `[MultiContext] Found ${allAuthIndices.length} auth files to preload: [${allAuthIndices.join(", ")}]`
-        );
-
-        const successful = [];
-        const failed = [];
-
-        // Preload contexts sequentially to avoid overwhelming the system
-        for (const authIndex of allAuthIndices) {
-            try {
-                this.logger.info(`[MultiContext] Preloading context for account #${authIndex}...`);
-                await this._initializeContext(authIndex);
-                successful.push(authIndex);
-                this.logger.info(`✅ [MultiContext] Account #${authIndex} context preloaded successfully.`);
-            } catch (error) {
-                this.logger.error(`❌ [MultiContext] Failed to preload account #${authIndex}: ${error.message}`);
-                failed.push({ error: error.message, index: authIndex });
+                    this.browser = null;
+                    this._cleanupAllContexts();
+                });
+                this.logger.info("✅ [Browser] Main browser instance launched successfully.");
             }
-        }
 
-        this.logger.info("==================================================");
-        this.logger.info(
-            `✅ [MultiContext] Preload complete: ${successful.length} successful, ${failed.length} failed`
-        );
-        if (successful.length > 0) {
-            this.logger.info(`   • Successful: [${successful.join(", ")}]`);
-        }
-        if (failed.length > 0) {
-            this.logger.info(`   • Failed: [${failed.map(f => f.index).join(", ")}]`);
-        }
-        this.logger.info("==================================================");
+            // Get all available auth indices
+            const allAuthIndices = this.authSource.availableIndices;
+            if (allAuthIndices.length === 0) {
+                this.logger.warn("[MultiContext] No auth files found, skipping preload.");
+                return { failed: [], successful: [] };
+            }
 
-        return { failed, successful };
+            this.logger.info(
+                `[MultiContext] Found ${allAuthIndices.length} auth files to preload: [${allAuthIndices.join(", ")}]`
+            );
+
+            const successful = [];
+            const failed = [];
+
+            // Preload contexts sequentially to avoid overwhelming the system
+            for (const authIndex of allAuthIndices) {
+                try {
+                    this.logger.info(`[MultiContext] Preloading context for account #${authIndex}...`);
+                    await this._initializeContext(authIndex);
+                    successful.push(authIndex);
+                    this.logger.info(`✅ [MultiContext] Account #${authIndex} context preloaded successfully.`);
+                } catch (error) {
+                    this.logger.error(`❌ [MultiContext] Failed to preload account #${authIndex}: ${error.message}`);
+                    failed.push({ error: error.message, index: authIndex });
+                }
+            }
+
+            this.logger.info("==================================================");
+            this.logger.info(
+                `✅ [MultiContext] Preload complete: ${successful.length} successful, ${failed.length} failed`
+            );
+            if (successful.length > 0) {
+                this.logger.info(`   • Successful: [${successful.join(", ")}]`);
+            }
+            if (failed.length > 0) {
+                this.logger.info(`   • Failed: [${failed.map(f => f.index).join(", ")}]`);
+            }
+            this.logger.info("==================================================");
+
+            // Clean up browser if all contexts failed to preload
+            if (successful.length === 0 && this.browser) {
+                this.logger.warn("[MultiContext] All contexts failed to preload, closing browser to free resources...");
+                await this.closeBrowser();
+            }
+
+            return { failed, successful };
+        } catch (error) {
+            // Catastrophic failure during preload - clean up any resources
+            this.logger.error(`❌ [MultiContext] Catastrophic failure during preload: ${error.message}`);
+            if (this.browser) {
+                this.logger.warn("[MultiContext] Cleaning up browser due to catastrophic failure...");
+                await this.closeBrowser();
+            }
+            throw error;
+        }
     }
 
     /**
@@ -1358,7 +1374,7 @@ class BrowserManager {
 
             // Validate that the page is still alive before switching
             const contextData = this.contexts.get(authIndex);
-            if (contextData.page.isClosed()) {
+            if (!contextData || !contextData.page || contextData.page.isClosed()) {
                 this.logger.warn(
                     `[FastSwitch] Page for account #${authIndex} is closed, cleaning up and re-initializing...`
                 );
@@ -1618,7 +1634,8 @@ class BrowserManager {
             this._currentAuthIndex = -1;
             // DO NOT reset backgroundWakeupRunning here!
             // If a BackgroundWakeup was running, it will detect this.page === null and exit on its own.
-            // Resetting the flag here could allow a new instance to start before the old one exits.            this.logger.info(`[Browser] Current context was closed, currentAuthIndex reset to -1.`);
+            // Resetting the flag here could allow a new instance to start before the old one exits.
+            this.logger.info(`[Browser] Current context was closed, currentAuthIndex reset to -1.`);
         }
 
         // Close the context AFTER removing from map

@@ -123,7 +123,7 @@ class ProxyServerSystem extends EventEmitter {
         // Preload all contexts at startup
         this.logger.info("[System] Starting multi-context preload...");
         try {
-            this.requestHandler.authSwitcher.isSystemBusy = true; // ← 防止 WebUI 状态检查干扰
+            this.requestHandler.authSwitcher.isSystemBusy = true;
             const preloadResult = await this.browserManager.preloadAllContexts();
 
             if (preloadResult.successful.length === 0) {
@@ -138,7 +138,7 @@ class ProxyServerSystem extends EventEmitter {
             this.emit("started");
             return;
         } finally {
-            this.requestHandler.authSwitcher.isSystemBusy = false; // ← 预加载完成，恢复正常
+            this.requestHandler.authSwitcher.isSystemBusy = false;
         }
 
         // Determine which context to activate first
