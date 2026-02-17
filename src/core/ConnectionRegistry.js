@@ -226,7 +226,7 @@ class ConnectionRegistry extends EventEmitter {
                 this.logger.warn(`[Server] Received message for unknown or outdated request ID: ${requestId}`);
             }
         } catch (error) {
-            this.logger.error("[Server] Failed to parse internal WebSocket message");
+            this.logger.error(`[Server] Failed to parse internal WebSocket message: ${error.message}`);
         }
     }
 
@@ -262,7 +262,7 @@ class ConnectionRegistry extends EventEmitter {
         const connection = this.connectionsByAuth.get(authIndex);
         if (connection) {
             this.logger.debug(`[Registry] Found WebSocket connection for authIndex=${authIndex}`);
-        } else {
+        } else if (this.logger.getLevel?.() === "DEBUG") {
             this.logger.debug(
                 `[Registry] No WebSocket connection found for authIndex=${authIndex}. Available: [${Array.from(this.connectionsByAuth.keys()).join(", ")}]`
             );
