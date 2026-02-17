@@ -30,6 +30,7 @@ class ConfigLoader {
             host: "0.0.0.0",
             httpPort: 7860,
             immediateSwitchStatusCodes: [429, 503],
+            maxContexts: 1,
             maxRetries: 3,
             retryDelay: 2000,
             streamingMode: "real",
@@ -51,6 +52,8 @@ class ConfigLoader {
         if (process.env.RETRY_DELAY)
             config.retryDelay = Math.max(50, parseInt(process.env.RETRY_DELAY, 10)) || config.retryDelay;
         if (process.env.WS_PORT) config.wsPort = parseInt(process.env.WS_PORT, 10) || config.wsPort;
+        if (process.env.MAX_CONTEXTS !== undefined)
+            config.maxContexts = Math.max(0, parseInt(process.env.MAX_CONTEXTS, 10)) || config.maxContexts;
         if (process.env.CAMOUFOX_EXECUTABLE_PATH) config.browserExecutablePath = process.env.CAMOUFOX_EXECUTABLE_PATH;
         if (process.env.API_KEYS) {
             config.apiKeys = process.env.API_KEYS.split(",");
@@ -138,6 +141,7 @@ class ConfigLoader {
         this.logger.info(`  Force Web Search: ${config.forceWebSearch}`);
         this.logger.info(`  Force URL Context: ${config.forceUrlContext}`);
         this.logger.info(`  Auto Update Auth: ${config.enableAuthUpdate}`);
+        this.logger.info(`  Max Contexts: ${config.maxContexts === 0 ? "Unlimited" : config.maxContexts}`);
         this.logger.info(
             `  Usage-based Switch Threshold: ${
                 config.switchOnUses > 0 ? `Switch after every ${config.switchOnUses} requests` : "Disabled"

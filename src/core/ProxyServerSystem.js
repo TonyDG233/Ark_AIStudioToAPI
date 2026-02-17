@@ -120,28 +120,7 @@ class ProxyServerSystem extends EventEmitter {
             return; // Exit early
         }
 
-        // Preload all contexts at startup
-        this.logger.info("[System] Starting multi-context preload...");
-        try {
-            this.requestHandler.authSwitcher.isSystemBusy = true;
-            const preloadResult = await this.browserManager.preloadAllContexts();
-
-            if (preloadResult.successful.length === 0) {
-                this.logger.error("[System] Failed to preload any contexts!");
-                this.emit("started");
-                return;
-            }
-
-            this.logger.info(`[System] ✅ Preloaded ${preloadResult.successful.length} contexts successfully.`);
-        } catch (error) {
-            this.logger.error(`[System] ❌ Context preload failed: ${error.message}`);
-            this.emit("started");
-            return;
-        } finally {
-            this.requestHandler.authSwitcher.isSystemBusy = false;
-        }
-
-        // Determine which context to activate first
+        // Determine startup order
         let startupOrder = allRotationIndices.length > 0 ? [...allRotationIndices] : [...allAvailableIndices];
         const hasInitialAuthIndex = Number.isInteger(initialAuthIndex);
         if (hasInitialAuthIndex) {
@@ -149,7 +128,7 @@ class ProxyServerSystem extends EventEmitter {
             if (canonicalInitialIndex !== null && startupOrder.includes(canonicalInitialIndex)) {
                 if (canonicalInitialIndex !== initialAuthIndex) {
                     this.logger.warn(
-                        `[System] Specified startup index #${initialAuthIndex} is a duplicate for the same email, using latest auth index #${canonicalInitialIndex} instead.`
+                        `[System] Specified startup index #${initialAuthIndex} is a duplicate, using latest auth index #${canonicalInitialIndex} instead.`
                     );
                 } else {
                     this.logger.info(
@@ -168,28 +147,27 @@ class ProxyServerSystem extends EventEmitter {
             );
         }
 
-        // Activate the first context (fast switch since already preloaded)
-        let isStarted = false;
-        for (const index of startupOrder) {
-            try {
-                this.logger.info(`[System] Activating pre-loaded context for account #${index}...`);
-                this.requestHandler.authSwitcher.isSystemBusy = true;
-                await this.browserManager.launchOrSwitchContext(index);
+        // Context pool startup
+        const maxContexts = this.config.maxContexts;
+        this.logger.info(`[System] Starting context pool (maxContexts=${maxContexts})...`);
 
-                isStarted = true;
-                this.logger.info(`[System] ✅ Successfully activated account #${index}!`);
-                break;
-            } catch (error) {
-                this.logger.error(`[System] ❌ Failed to activate account #${index}. Reason: ${error.message}`);
-            } finally {
-                this.requestHandler.authSwitcher.isSystemBusy = false;
+        try {
+            this.requestHandler.authSwitcher.isSystemBusy = true;
+            const { firstReady } = await this.browserManager.preloadContextPool(startupOrder, maxContexts);
+
+            if (firstReady === null) {
+                this.logger.error("[System] Failed to initialize any context!");
+                this.emit("started");
+                return;
             }
-        }
 
-        if (!isStarted) {
-            this.logger.warn(
-                "[System] All authentication sources failed to activate. Starting in account binding mode without an active account."
-            );
+            // Activate first ready context (fast switch since already preloaded)
+            await this.browserManager.launchOrSwitchContext(firstReady);
+            this.logger.info(`[System] ✅ Successfully activated account #${firstReady}!`);
+        } catch (error) {
+            this.logger.error(`[System] ❌ Startup failed: ${error.message}`);
+        } finally {
+            this.requestHandler.authSwitcher.isSystemBusy = false;
         }
 
         this.emit("started");

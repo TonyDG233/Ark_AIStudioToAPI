@@ -107,12 +107,16 @@ class StatusRoutes {
 
         app.get("/api/status", isAuthenticated, async (req, res) => {
             // Force a reload of auth sources on each status check for real-time accuracy
-            this.serverSystem.authSource.reloadAuthSources();
+            const hasChanges = this.serverSystem.authSource.reloadAuthSources();
 
             const { authSource, browserManager, requestHandler } = this.serverSystem;
 
             // If the system is busy switching accounts, skip the validity check to prevent race conditions
             if (requestHandler.isSystemBusy) {
+                // Rebalance context pool if auth files changed
+                if (hasChanges) {
+                    this.serverSystem.browserManager.rebalanceContextPool();
+                }
                 return res.json(this._getStatusData());
             }
 
@@ -131,6 +135,12 @@ class StatusRoutes {
                         this.logger.error(`[System] Error while closing context automatically: ${err.message}`);
                     }
                 }
+            }
+
+            // Rebalance context pool if auth files changed (e.g., user manually added/removed files)
+            if (hasChanges) {
+                this.logger.info("[System] Auth file changes detected, rebalancing context pool...");
+                this.serverSystem.browserManager.rebalanceContextPool();
             }
 
             res.json(this._getStatusData());
@@ -232,6 +242,11 @@ class StatusRoutes {
                     });
                 }
 
+                // Rebalance context pool after dedup
+                if (removedIndices.length > 0) {
+                    this.serverSystem.browserManager.rebalanceContextPool();
+                }
+
                 return res.status(200).json({
                     message: "accountDedupSuccess",
                     removedIndices,
@@ -323,6 +338,11 @@ class StatusRoutes {
                     // Then close WebSocket connection
                     this.serverSystem.connectionRegistry.closeConnectionByAuth(idx);
                 }
+            }
+
+            // Rebalance context pool after batch delete
+            if (successIndices.length > 0) {
+                this.serverSystem.browserManager.rebalanceContextPool();
             }
 
             if (failedIndices.length > 0) {
@@ -472,6 +492,9 @@ class StatusRoutes {
                 // Then close WebSocket connection
                 this.serverSystem.connectionRegistry.closeConnectionByAuth(targetIndex);
 
+                // Rebalance context pool after delete
+                this.serverSystem.browserManager.rebalanceContextPool();
+
                 this.logger.info(
                     `[WebUI] Account #${targetIndex} deleted via web interface. Previous current account: #${currentAuthIndex}`
                 );
@@ -583,6 +606,9 @@ class StatusRoutes {
 
                 // Reload auth sources to pick up changes
                 this.serverSystem.authSource.reloadAuthSources();
+
+                // Rebalance context pool to pick up new account
+                this.serverSystem.browserManager.rebalanceContextPool();
 
                 this.logger.info(`[WebUI] File uploaded via API: generated ${newFilename}`);
                 res.status(200).json({ filename: newFilename, message: "File uploaded successfully" });

@@ -27,6 +27,10 @@ class BrowserManager {
         // Map: authIndex -> {context, page, healthMonitorInterval}
         this.contexts = new Map();
 
+        // Context pool state tracking
+        this.initializingContexts = new Set(); // Indices currently being initialized in background
+        this.abortedContexts = new Set(); // Indices that should be aborted during background init
+
         // Legacy single context references (for backward compatibility)
         this.context = null;
         this.page = null;
@@ -158,6 +162,28 @@ class BrowserManager {
             this.logger.error(`[Auth Update] ❌ Failed to update auth file: ${error.message}`);
         }
     }
+
+    /**
+     * Get pool target indices based on current account and rotation order
+     * @param {number} maxContexts - Max pool size (0 = unlimited)
+     * @returns {number[]} Target indices for the pool
+     */
+    // _getPoolTargetIndices(maxContexts) {
+    //     const rotation = this.authSource.getRotationIndices();
+    //     if (rotation.length === 0) return [];
+    //     if (maxContexts === 0 || maxContexts >= rotation.length) return [...rotation];
+    //
+    //     const currentCanonical =
+    //         this._currentAuthIndex >= 0 ? this.authSource.getCanonicalIndex(this._currentAuthIndex) : null;
+    //     const startPos = currentCanonical !== null ? rotation.indexOf(currentCanonical) : -1;
+    //     const start = startPos >= 0 ? startPos : 0;
+    //
+    //     const result = [];
+    //     for (let i = 0; i < maxContexts && i < rotation.length; i++) {
+    //         result.push(rotation[(start + i) % rotation.length]);
+    //     }
+    //     return result;
+    // }
 
     /**
      * Interface: Notify user activity
@@ -1155,97 +1181,173 @@ class BrowserManager {
     }
 
     /**
-     * Preload all available auth contexts at startup
-     * This method initializes all contexts in sequentially (one by one) and keeps them ready for instant switching
-     * @returns {Promise<{successful: number[], failed: Array<{index: number, error: string}>}>}
+     * Preload a pool of contexts at startup
+     * Synchronously initializes the first context, then starts remaining in background
+     * @param {number[]} startupOrder - Ordered list of auth indices to try
+     * @param {number} maxContexts - Max pool size (0 = unlimited)
+     * @returns {Promise<{firstReady: number|null}>}
      */
-    async preloadAllContexts() {
-        this.logger.info("==================================================");
-        this.logger.info("🚀 [MultiContext] Starting preload of all auth contexts...");
-        this.logger.info("==================================================");
+    async preloadContextPool(startupOrder, maxContexts) {
+        const poolSize = maxContexts === 0 ? startupOrder.length : Math.min(maxContexts, startupOrder.length);
+        this.logger.info(
+            `🚀 [ContextPool] Starting pool preload (pool=${poolSize}, order=[${startupOrder.join(", ")}])...`
+        );
 
-        try {
-            // Launch browser if not already running
-            const proxyConfig = parseProxyFromEnv();
-            if (!this.browser) {
-                this.logger.info("🚀 [Browser] Launching main browser instance...");
-                if (!fs.existsSync(this.browserExecutablePath)) {
-                    throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
-                }
-                this.browser = await firefox.launch({
-                    args: this.launchArgs,
-                    executablePath: this.browserExecutablePath,
-                    firefoxUserPrefs: this.firefoxUserPrefs,
-                    headless: true,
-                    ...(proxyConfig ? { proxy: proxyConfig } : {}),
-                });
-                this.browser.on("disconnected", () => {
-                    if (!this.isClosingIntentionally) {
-                        this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
-                    } else {
-                        this.logger.info("[Browser] Main browser closed intentionally.");
-                    }
+        // Launch browser if not already running
+        if (!this.browser) {
+            await this._ensureBrowser();
+        }
 
-                    this.browser = null;
-                    this._cleanupAllContexts();
-                });
-                this.logger.info("✅ [Browser] Main browser instance launched successfully.");
+        // Synchronously try ALL indices until one succeeds (fallback beyond poolSize)
+        let firstReady = null;
+        let syncEndIdx = 0;
+
+        for (let i = 0; i < startupOrder.length; i++) {
+            try {
+                this.logger.info(`[ContextPool] Initializing context #${startupOrder[i]}...`);
+                await this._initializeContext(startupOrder[i]);
+                firstReady = startupOrder[i];
+                syncEndIdx = i + 1;
+                this.logger.info(`✅ [ContextPool] First context #${startupOrder[i]} ready.`);
+                break;
+            } catch (error) {
+                this.logger.error(`❌ [ContextPool] Context #${startupOrder[i]} failed: ${error.message}`);
+                syncEndIdx = i + 1;
             }
+        }
 
-            // Get all available auth indices
-            const allAuthIndices = this.authSource.availableIndices;
-            if (allAuthIndices.length === 0) {
-                this.logger.warn("[MultiContext] No auth files found, skipping preload.");
-                return { failed: [], successful: [] };
+        if (firstReady === null) {
+            if (this.browser) await this.closeBrowser();
+            return { firstReady: null };
+        }
+
+        // Background: fill up to poolSize from remaining candidates (fire-and-forget)
+        const remaining = startupOrder.slice(syncEndIdx);
+        if (remaining.length > 0 && this.contexts.size < poolSize) {
+            this._preloadBackgroundContexts(remaining, poolSize);
+        }
+
+        return { firstReady };
+    }
+
+    /**
+     * Launch browser instance if not already running
+     */
+    async _ensureBrowser() {
+        if (this.browser) return;
+
+        const proxyConfig = parseProxyFromEnv();
+        this.logger.info("🚀 [Browser] Launching main browser instance...");
+        if (!fs.existsSync(this.browserExecutablePath)) {
+            this._currentAuthIndex = -1;
+            throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
+        }
+        this.browser = await firefox.launch({
+            args: this.launchArgs,
+            executablePath: this.browserExecutablePath,
+            firefoxUserPrefs: this.firefoxUserPrefs,
+            headless: true,
+            ...(proxyConfig ? { proxy: proxyConfig } : {}),
+        });
+        this.browser.on("disconnected", () => {
+            if (!this.isClosingIntentionally) {
+                this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
+            } else {
+                this.logger.info("[Browser] Main browser closed intentionally.");
             }
+            this.browser = null;
+            this._cleanupAllContexts();
+        });
+        this.logger.info("✅ [Browser] Main browser instance launched successfully.");
+    }
 
-            this.logger.info(
-                `[MultiContext] Found ${allAuthIndices.length} auth files to preload: [${allAuthIndices.join(", ")}]`
-            );
+    /**
+     * Background sequential initialization of contexts (fire-and-forget)
+     * @param {number[]} indices - Auth indices to initialize (candidates, may exceed pool size)
+     * @param {number} maxPoolSize - Stop when this.contexts.size reaches this limit (0 = no limit)
+     */
+    async _preloadBackgroundContexts(indices, maxPoolSize = 0) {
+        this.logger.info(
+            `[ContextPool] Background preload starting for [${indices.join(", ")}] (poolCap=${maxPoolSize || "unlimited"})...`
+        );
+        for (const authIndex of indices) {
+            if (maxPoolSize > 0 && this.contexts.size >= maxPoolSize) break;
+            if (this.contexts.has(authIndex)) continue;
 
-            const successful = [];
-            const failed = [];
-
-            // Preload contexts sequentially to avoid overwhelming the system
-            for (const authIndex of allAuthIndices) {
-                try {
-                    this.logger.info(`[MultiContext] Preloading context for account #${authIndex}...`);
-                    await this._initializeContext(authIndex);
-                    successful.push(authIndex);
-                    this.logger.info(`✅ [MultiContext] Account #${authIndex} context preloaded successfully.`);
-                } catch (error) {
-                    this.logger.error(`❌ [MultiContext] Failed to preload account #${authIndex}: ${error.message}`);
-                    failed.push({ error: error.message, index: authIndex });
-                }
+            this.initializingContexts.add(authIndex);
+            try {
+                this.logger.info(`[ContextPool] Background init context #${authIndex}...`);
+                await this._initializeContext(authIndex);
+                this.logger.info(`✅ [ContextPool] Background context #${authIndex} ready.`);
+            } catch (error) {
+                this.logger.error(`❌ [ContextPool] Background context #${authIndex} failed: ${error.message}`);
+            } finally {
+                this.initializingContexts.delete(authIndex);
             }
+        }
+        this.logger.info(`[ContextPool] Background preload complete.`);
+    }
 
-            this.logger.info("==================================================");
-            this.logger.info(
-                `✅ [MultiContext] Preload complete: ${successful.length} successful, ${failed.length} failed`
-            );
-            if (successful.length > 0) {
-                this.logger.info(`   • Successful: [${successful.join(", ")}]`);
-            }
-            if (failed.length > 0) {
-                this.logger.info(`   • Failed: [${failed.map(f => f.index).join(", ")}]`);
-            }
-            this.logger.info("==================================================");
+    /**
+     * Rebalance context pool after account changes
+     * Removes excess contexts and starts missing ones in background
+     */
+    async rebalanceContextPool() {
+        const maxContexts = this.config.maxContexts;
+        const poolSize = maxContexts === 0 ? 0 : maxContexts;
 
-            // Clean up browser if all contexts failed to preload
-            if (successful.length === 0 && this.browser) {
-                this.logger.warn("[MultiContext] All contexts failed to preload, closing browser to free resources...");
-                await this.closeBrowser();
-            }
+        // Build full rotation ordered from current account
+        const rotation = this.authSource.getRotationIndices();
+        const currentCanonical =
+            this._currentAuthIndex >= 0 ? this.authSource.getCanonicalIndex(this._currentAuthIndex) : null;
+        const startPos = currentCanonical !== null ? Math.max(rotation.indexOf(currentCanonical), 0) : 0;
+        const ordered = [];
+        for (let i = 0; i < rotation.length; i++) {
+            ordered.push(rotation[(startPos + i) % rotation.length]);
+        }
 
-            return { failed, successful };
-        } catch (error) {
-            // Catastrophic failure during preload - clean up any resources
-            this.logger.error(`❌ [MultiContext] Catastrophic failure during preload: ${error.message}`);
-            if (this.browser) {
-                this.logger.warn("[MultiContext] Cleaning up browser due to catastrophic failure...");
-                await this.closeBrowser();
+        // Targets = first poolSize from ordered (or all if unlimited)
+        const targets = new Set(poolSize === 0 ? ordered : ordered.slice(0, poolSize));
+
+        // Remove contexts not in targets (except current)
+        const toRemove = [];
+        for (const idx of this.contexts.keys()) {
+            if (!targets.has(idx) && idx !== this._currentAuthIndex) {
+                toRemove.push(idx);
             }
-            throw error;
+        }
+
+        // Candidates: contexts that will be active after toRemove is processed
+        // This ensures accounts being removed are considered "free slots" for candidates
+        const activeContexts = new Set([...this.contexts.keys()].filter(idx => !toRemove.includes(idx)));
+        const candidates = ordered.filter(idx => !activeContexts.has(idx) && !this.initializingContexts.has(idx));
+
+        this.logger.info(
+            `[ContextPool] Rebalance: targets=[${[...targets]}], remove=[${toRemove}], candidates=[${candidates}]`
+        );
+
+        for (const idx of toRemove) {
+            await this.closeContext(idx);
+        }
+
+        // Preload candidates if we have room in the pool
+        if (candidates.length > 0 && (poolSize === 0 || this.contexts.size < poolSize)) {
+            this._preloadBackgroundContexts(candidates, poolSize);
+        }
+    }
+
+    /**
+     * Wait for a background context initialization to complete
+     * @param {number} authIndex - The auth index to wait for
+     * @param {number} timeoutMs - Timeout in milliseconds
+     */
+    async _waitForContextInit(authIndex, timeoutMs = 120000) {
+        const start = Date.now();
+        while (this.initializingContexts.has(authIndex)) {
+            if (Date.now() - start > timeoutMs) {
+                throw new Error(`Timeout waiting for context #${authIndex} initialization`);
+            }
+            await new Promise(r => setTimeout(r, 500));
         }
     }
 
@@ -1367,32 +1469,15 @@ class BrowserManager {
             }
         }
 
+        // Wait for background initialization if in progress
+        if (this.initializingContexts.has(authIndex)) {
+            this.logger.info(`[Browser] Context #${authIndex} is being initialized in background, waiting...`);
+            await this._waitForContextInit(authIndex);
+        }
+
         // Check if browser is running, launch if needed
         if (!this.browser) {
-            const proxyConfig = parseProxyFromEnv();
-            this.logger.info("🚀 [Browser] Main browser instance not running, performing first-time launch...");
-            if (!fs.existsSync(this.browserExecutablePath)) {
-                this._currentAuthIndex = -1;
-                throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
-            }
-            this.browser = await firefox.launch({
-                args: this.launchArgs,
-                executablePath: this.browserExecutablePath,
-                firefoxUserPrefs: this.firefoxUserPrefs,
-                headless: true,
-                ...(proxyConfig ? { proxy: proxyConfig } : {}),
-            });
-            this.browser.on("disconnected", () => {
-                if (!this.isClosingIntentionally) {
-                    this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
-                } else {
-                    this.logger.info("[Browser] Main browser closed intentionally.");
-                }
-
-                this.browser = null;
-                this._cleanupAllContexts();
-            });
-            this.logger.info("✅ [Browser] Main browser instance successfully launched.");
+            await this._ensureBrowser();
         }
 
         // Check if context already exists (fast switch path)
@@ -1654,8 +1739,15 @@ class BrowserManager {
      * @param {number} authIndex - The auth index to close
      */
     async closeContext(authIndex) {
+        // If context is being initialized in background, signal abort and wait
+        if (this.initializingContexts.has(authIndex)) {
+            this.logger.info(`[Browser] Context #${authIndex} is being initialized, marking for abort and waiting...`);
+            this.abortedContexts.add(authIndex);
+            await this._waitForContextInit(authIndex);
+            this.abortedContexts.delete(authIndex);
+        }
+
         if (!this.contexts.has(authIndex)) {
-            this.logger.warn(`[Browser] Context #${authIndex} not found, nothing to close.`);
             return;
         }
 
@@ -1718,6 +1810,8 @@ class BrowserManager {
 
         // Reset all references
         this.contexts.clear();
+        this.initializingContexts.clear();
+        this.abortedContexts.clear();
         this.context = null;
         this.page = null;
         this._currentAuthIndex = -1;
