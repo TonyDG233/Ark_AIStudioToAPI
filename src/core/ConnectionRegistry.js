@@ -139,6 +139,12 @@ class ConnectionRegistry extends EventEmitter {
                 if (this.reconnectingAccounts.has(disconnectedAuthIndex)) {
                     this.reconnectingAccounts.delete(disconnectedAuthIndex);
                 }
+                // Close pending message queues if this is the current account
+                // to prevent in-flight requests from hanging until timeout
+                const currentAuthIndex = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
+                if (disconnectedAuthIndex === currentAuthIndex) {
+                    this.closeAllMessageQueues();
+                }
                 this.emit("connectionRemoved", websocket);
                 return;
             }
