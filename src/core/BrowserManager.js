@@ -30,6 +30,7 @@ class BrowserManager {
         // Context pool state tracking
         this.initializingContexts = new Set(); // Indices currently being initialized in background
         this.abortedContexts = new Set(); // Indices that should be aborted during background init
+        this._preloadGeneration = 0; // Generation counter to ensure only one preload task is active
 
         // Legacy single context references (for backward compatibility)
         this.context = null;
@@ -1200,19 +1201,16 @@ class BrowserManager {
 
         // Synchronously try ALL indices until one succeeds (fallback beyond poolSize)
         let firstReady = null;
-        let syncEndIdx = 0;
 
         for (let i = 0; i < startupOrder.length; i++) {
             try {
                 this.logger.info(`[ContextPool] Initializing context #${startupOrder[i]}...`);
                 await this._initializeContext(startupOrder[i]);
                 firstReady = startupOrder[i];
-                syncEndIdx = i + 1;
                 this.logger.info(`✅ [ContextPool] First context #${startupOrder[i]} ready.`);
                 break;
             } catch (error) {
                 this.logger.error(`❌ [ContextPool] Context #${startupOrder[i]} failed: ${error.message}`);
-                syncEndIdx = i + 1;
             }
         }
 
@@ -1221,10 +1219,36 @@ class BrowserManager {
             return { firstReady: null };
         }
 
-        // Background: fill up to poolSize from remaining candidates (fire-and-forget)
-        const remaining = startupOrder.slice(syncEndIdx);
-        if (remaining.length > 0 && this.contexts.size < poolSize) {
-            this._preloadBackgroundContexts(remaining, poolSize);
+        // Background: calculate remaining contexts using rotation order (same logic as rebalanceContextPool)
+        // This ensures startup pool matches the rotation order used during account switching
+        const rotation = this.authSource.getRotationIndices();
+        const currentCanonical = this.authSource.getCanonicalIndex(firstReady);
+        const startPos = currentCanonical !== null ? Math.max(rotation.indexOf(currentCanonical), 0) : 0;
+        const ordered = [];
+        for (let i = 0; i < rotation.length; i++) {
+            ordered.push(rotation[(startPos + i) % rotation.length]);
+        }
+
+        // Calculate how many more contexts we need to reach poolSize
+        const needCount = poolSize - this.contexts.size;
+        if (needCount > 0) {
+            // Get candidates from ordered list (excluding already initialized contexts)
+            // Convert existing contexts to canonical indices to handle duplicate accounts
+            const existingCanonical = new Set(
+                [...this.contexts.keys()].map(idx => this.authSource.getCanonicalIndex(idx) ?? idx)
+            );
+            const candidates = ordered.filter(
+                idx => !existingCanonical.has(idx) && !this.initializingContexts.has(idx)
+            );
+
+            if (candidates.length > 0) {
+                this.logger.info(
+                    `[ContextPool] Background preload will try [${candidates.join(", ")}] to reach pool size ${poolSize} (need ${needCount} more)`
+                );
+                // Pass all candidates, not just the first needCount
+                // This allows the background task to try subsequent accounts if earlier ones fail
+                this._preloadBackgroundContexts(candidates, poolSize);
+            }
         }
 
         return { firstReady };
@@ -1263,29 +1287,74 @@ class BrowserManager {
 
     /**
      * Background sequential initialization of contexts (fire-and-forget)
+     * Only one instance should be active at a time - new calls supersede old ones
      * @param {number[]} indices - Auth indices to initialize (candidates, may exceed pool size)
      * @param {number} maxPoolSize - Stop when this.contexts.size reaches this limit (0 = no limit)
      */
     async _preloadBackgroundContexts(indices, maxPoolSize = 0) {
+        // Increment generation to signal old tasks to stop
+        const generation = ++this._preloadGeneration;
+
         this.logger.info(
-            `[ContextPool] Background preload starting for [${indices.join(", ")}] (poolCap=${maxPoolSize || "unlimited"})...`
+            `[ContextPool] Background preload #${generation} starting for [${indices.join(", ")}] (poolCap=${maxPoolSize || "unlimited"})...`
         );
+
         for (const authIndex of indices) {
-            if (maxPoolSize > 0 && this.contexts.size >= maxPoolSize) break;
-            if (this.contexts.has(authIndex)) continue;
+            // Check if browser is still available
+            if (!this.browser) {
+                this.logger.info(`[ContextPool] Background preload #${generation} stopped: browser is not available`);
+                break;
+            }
+
+            // Check pool size limit
+            if (maxPoolSize > 0 && this.contexts.size >= maxPoolSize) {
+                this.logger.info(`[ContextPool] Pool size limit reached, stopping preload #${generation}`);
+                break;
+            }
+
+            // Skip if already exists or being initialized by another task
+            if (this.contexts.has(authIndex)) {
+                this.logger.debug(`[ContextPool] Context #${authIndex} already exists, skipping`);
+                continue;
+            }
+            if (this.initializingContexts.has(authIndex)) {
+                this.logger.info(
+                    `[ContextPool] Context #${authIndex} already being initialized by another task, skipping`
+                );
+                continue;
+            }
+
+            // Check if this task has been superseded BEFORE starting a new initialization
+            // This allows the current initialization to complete even if superseded
+            if (this._preloadGeneration !== generation) {
+                this.logger.info(
+                    `[ContextPool] Background preload #${generation} superseded by newer task #${this._preloadGeneration}, stopping`
+                );
+                break;
+            }
 
             this.initializingContexts.add(authIndex);
             try {
-                this.logger.info(`[ContextPool] Background init context #${authIndex}...`);
+                this.logger.info(`[ContextPool] Background preload #${generation} init context #${authIndex}...`);
                 await this._initializeContext(authIndex);
                 this.logger.info(`✅ [ContextPool] Background context #${authIndex} ready.`);
             } catch (error) {
-                this.logger.error(`❌ [ContextPool] Background context #${authIndex} failed: ${error.message}`);
+                // Check if this is an abort error (user deleted the account during initialization)
+                const isAbortError = error.message && error.message.includes("aborted for index");
+                if (isAbortError) {
+                    this.logger.info(`[ContextPool] Background context #${authIndex} aborted (account deleted)`);
+                } else {
+                    this.logger.error(`❌ [ContextPool] Background context #${authIndex} failed: ${error.message}`);
+                }
             } finally {
                 this.initializingContexts.delete(authIndex);
             }
         }
-        this.logger.info(`[ContextPool] Background preload complete.`);
+
+        // Only log completion if this task wasn't superseded
+        if (this._preloadGeneration === generation) {
+            this.logger.info(`[ContextPool] Background preload #${generation} complete.`);
+        }
     }
 
     /**
@@ -1311,16 +1380,38 @@ class BrowserManager {
         const targets = new Set(isUnlimited ? ordered : ordered.slice(0, maxContexts));
 
         // Remove contexts not in targets (except current)
+        // Special handling: if current account is a duplicate (old version), also remove its canonical version
         const toRemove = [];
+        const currentCanonicalIndex = currentCanonical; // Already calculated above
+        const isDuplicateAccount =
+            this._currentAuthIndex >= 0 &&
+            currentCanonicalIndex !== null &&
+            currentCanonicalIndex !== this._currentAuthIndex;
+
         for (const idx of this.contexts.keys()) {
-            if (!targets.has(idx) && idx !== this._currentAuthIndex) {
+            // Skip current account
+            if (idx === this._currentAuthIndex) continue;
+
+            // If current is a duplicate, also remove the canonical version (we're using the old one)
+            if (isDuplicateAccount && idx === currentCanonicalIndex) {
+                toRemove.push(idx);
+                continue;
+            }
+
+            // Remove if not in targets
+            if (!targets.has(idx)) {
                 toRemove.push(idx);
             }
         }
 
-        // Candidates: contexts that will be active after toRemove is processed
-        // This ensures accounts being removed are considered "free slots" for candidates
-        const activeContexts = new Set([...this.contexts.keys()].filter(idx => !toRemove.includes(idx)));
+        // Candidates: all accounts from ordered that are not yet initialized
+        // Pass the full ordered list to allow fallback if target accounts fail
+        // The background task will stop when poolSize is reached
+        // Convert activeContexts to canonical indices to handle duplicate accounts
+        const activeContextsRaw = new Set([...this.contexts.keys()].filter(idx => !toRemove.includes(idx)));
+        const activeContexts = new Set(
+            [...activeContextsRaw].map(idx => this.authSource.getCanonicalIndex(idx) ?? idx)
+        );
         const candidates = ordered.filter(idx => !activeContexts.has(idx) && !this.initializingContexts.has(idx));
 
         this.logger.info(
