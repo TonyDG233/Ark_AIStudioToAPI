@@ -1204,14 +1204,26 @@ class BrowserManager {
         let firstReady = null;
 
         for (let i = 0; i < startupOrder.length; i++) {
+            const authIndex = startupOrder[i];
+
+            // Skip if already initialized or being initialized
+            if (this.contexts.has(authIndex) || this.initializingContexts.has(authIndex)) {
+                this.logger.info(`[ContextPool] Context #${authIndex} already exists or being initialized, skipping`);
+                firstReady = authIndex;
+                break;
+            }
+
+            this.initializingContexts.add(authIndex);
             try {
-                this.logger.info(`[ContextPool] Initializing context #${startupOrder[i]}...`);
-                await this._initializeContext(startupOrder[i]);
-                firstReady = startupOrder[i];
-                this.logger.info(`✅ [ContextPool] First context #${startupOrder[i]} ready.`);
+                this.logger.info(`[ContextPool] Initializing context #${authIndex}...`);
+                await this._initializeContext(authIndex);
+                firstReady = authIndex;
+                this.logger.info(`✅ [ContextPool] First context #${authIndex} ready.`);
                 break;
             } catch (error) {
-                this.logger.error(`❌ [ContextPool] Context #${startupOrder[i]} failed: ${error.message}`);
+                this.logger.error(`❌ [ContextPool] Context #${authIndex} failed: ${error.message}`);
+            } finally {
+                // Note: _initializeContext already removes from initializingContexts in its finally block
             }
         }
 

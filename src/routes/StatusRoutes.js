@@ -115,7 +115,9 @@ class StatusRoutes {
             if (requestHandler.isSystemBusy) {
                 // Rebalance context pool if auth files changed
                 if (hasChanges) {
-                    this.serverSystem.browserManager.rebalanceContextPool();
+                    this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                        this.logger.error(`[System] Background rebalance failed: ${err.message}`);
+                    });
                 }
                 return res.json(this._getStatusData());
             }
@@ -140,7 +142,9 @@ class StatusRoutes {
             // Rebalance context pool if auth files changed (e.g., user manually added/removed files)
             if (hasChanges) {
                 this.logger.info("[System] Auth file changes detected, rebalancing context pool...");
-                this.serverSystem.browserManager.rebalanceContextPool();
+                this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                    this.logger.error(`[System] Background rebalance failed: ${err.message}`);
+                });
             }
 
             res.json(this._getStatusData());
@@ -249,7 +253,9 @@ class StatusRoutes {
 
                 // Rebalance context pool after dedup
                 if (removedIndices.length > 0) {
-                    this.serverSystem.browserManager.rebalanceContextPool();
+                    this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                        this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
+                    });
                 }
 
                 return res.status(200).json({
@@ -352,7 +358,9 @@ class StatusRoutes {
 
             // Rebalance context pool after batch delete
             if (successIndices.length > 0) {
-                this.serverSystem.browserManager.rebalanceContextPool();
+                this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                    this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
+                });
             }
 
             if (failedIndices.length > 0) {
@@ -506,7 +514,9 @@ class StatusRoutes {
                 this.serverSystem.connectionRegistry.closeConnectionByAuth(targetIndex);
 
                 // Rebalance context pool after delete
-                this.serverSystem.browserManager.rebalanceContextPool();
+                this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                    this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
+                });
 
                 this.logger.info(
                     `[WebUI] Account #${targetIndex} deleted via web interface. Previous current account: #${currentAuthIndex}`
@@ -621,7 +631,9 @@ class StatusRoutes {
                 this.serverSystem.authSource.reloadAuthSources();
 
                 // Rebalance context pool to pick up new account
-                this.serverSystem.browserManager.rebalanceContextPool();
+                this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                    this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
+                });
 
                 this.logger.info(`[WebUI] File uploaded via API: generated ${newFilename}`);
                 res.status(200).json({ filename: newFilename, message: "File uploaded successfully" });

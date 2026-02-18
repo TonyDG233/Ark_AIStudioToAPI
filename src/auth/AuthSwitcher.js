@@ -77,7 +77,9 @@ class AuthSwitcher {
                 try {
                     await this.browserManager.launchOrSwitchContext(singleIndex);
                     this.resetCounters();
-                    this.browserManager.rebalanceContextPool();
+                    this.browserManager.rebalanceContextPool().catch(err => {
+                        this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
+                    });
 
                     this.logger.info(
                         `✅ [Auth] Single account #${singleIndex} restart/refresh successful, usage count reset.`
@@ -132,7 +134,9 @@ class AuthSwitcher {
                     await this.browserManager.preCleanupForSwitch(accountIndex);
                     await this.browserManager.switchAccount(accountIndex);
                     this.resetCounters();
-                    this.browserManager.rebalanceContextPool();
+                    this.browserManager.rebalanceContextPool().catch(err => {
+                        this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
+                    });
 
                     if (failedAccounts.length > 0) {
                         this.logger.info(
@@ -165,7 +169,9 @@ class AuthSwitcher {
                     await this.browserManager.preCleanupForSwitch(originalStartAccount);
                     await this.browserManager.switchAccount(originalStartAccount);
                     this.resetCounters();
-                    this.browserManager.rebalanceContextPool();
+                    this.browserManager.rebalanceContextPool().catch(err => {
+                        this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
+                    });
                     this.logger.info(
                         `✅ [Auth] Final attempt succeeded! Switched to account #${originalStartAccount}.`
                     );
@@ -224,7 +230,9 @@ class AuthSwitcher {
             await this.browserManager.preCleanupForSwitch(targetIndex);
             await this.browserManager.switchAccount(targetIndex);
             this.resetCounters();
-            this.browserManager.rebalanceContextPool();
+            this.browserManager.rebalanceContextPool().catch(err => {
+                this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
+            });
             this.logger.info(`✅ [Auth] Successfully switched to account #${targetIndex}, counters reset.`);
             return { newIndex: targetIndex, success: true };
         } catch (error) {
