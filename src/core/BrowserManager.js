@@ -30,7 +30,8 @@ class BrowserManager {
         // Context pool state tracking
         this.initializingContexts = new Set(); // Indices currently being initialized in background
         this.abortedContexts = new Set(); // Indices that should be aborted during background init
-        this._preloadGeneration = 0; // Generation counter to ensure only one preload task is active
+        this._backgroundPreloadTask = null; // Current background preload task promise (only one at a time)
+        this._backgroundPreloadAbort = false; // Flag to signal background task to abort
 
         // Legacy single context references (for backward compatibility)
         this.context = null;
@@ -1293,30 +1294,71 @@ class BrowserManager {
 
     /**
      * Background sequential initialization of contexts (fire-and-forget)
-     * Only one instance should be active at a time - new calls supersede old ones
+     * Only one instance should be active at a time - new calls abort old ones
      * @param {number[]} indices - Auth indices to initialize (candidates, may exceed pool size)
      * @param {number} maxPoolSize - Stop when this.contexts.size reaches this limit (0 = no limit)
      */
     async _preloadBackgroundContexts(indices, maxPoolSize = 0) {
-        // Increment generation to signal old tasks to stop
-        const generation = ++this._preloadGeneration;
+        // If there's an existing background task, abort it and wait for it to finish
+        if (this._backgroundPreloadTask) {
+            this.logger.info(`[ContextPool] Aborting previous background preload task...`);
+            this._backgroundPreloadAbort = true;
+            try {
+                await this._backgroundPreloadTask;
+            } catch (error) {
+                // Ignore errors from aborted task
+                this.logger.debug(`[ContextPool] Previous background preload task aborted: ${error.message}`);
+            }
+            this.logger.info(`[ContextPool] Previous background preload task aborted successfully`);
+        }
 
+        // Reset abort flag and create new background task
+        this._backgroundPreloadAbort = false;
+        const currentTask = this._executePreloadTask(indices, maxPoolSize);
+        this._backgroundPreloadTask = currentTask;
+
+        // Don't await here - this is fire-and-forget
+        // But ensure we clean up the task reference when done
+        currentTask
+            .catch(error => {
+                this.logger.error(`[ContextPool] Background preload task failed: ${error.message}`);
+            })
+            .finally(() => {
+                // Only clear if this is still the current task
+                if (this._backgroundPreloadTask === currentTask) {
+                    this._backgroundPreloadTask = null;
+                }
+            });
+    }
+
+    /**
+     * Internal method to execute the actual preload task
+     * @private
+     */
+    async _executePreloadTask(indices, maxPoolSize) {
         this.logger.info(
-            `[ContextPool] Background preload (gen=${generation}) starting for [${indices.join(", ")}] (poolCap=${maxPoolSize || "unlimited"})...`
+            `[ContextPool] Background preload starting for [${indices.join(", ")}] (poolCap=${maxPoolSize || "unlimited"})...`
         );
 
+        let aborted = false;
+
         for (const authIndex of indices) {
+            // Check if abort was requested
+            if (this._backgroundPreloadAbort) {
+                this.logger.info(`[ContextPool] Background preload aborted by request`);
+                aborted = true;
+                break;
+            }
+
             // Check if browser is still available
             if (!this.browser) {
-                this.logger.info(
-                    `[ContextPool] Background preload (gen=${generation}) stopped: browser is not available`
-                );
+                this.logger.info(`[ContextPool] Background preload stopped: browser is not available`);
                 break;
             }
 
             // Check pool size limit
             if (maxPoolSize > 0 && this.contexts.size >= maxPoolSize) {
-                this.logger.info(`[ContextPool] Pool size limit reached, stopping preload (gen=${generation})`);
+                this.logger.info(`[ContextPool] Pool size limit reached, stopping preload`);
                 break;
             }
 
@@ -1332,25 +1374,18 @@ class BrowserManager {
                 continue;
             }
 
-            // Check if this task has been superseded BEFORE starting a new initialization
-            // This allows the current initialization to complete even if superseded
-            if (this._preloadGeneration !== generation) {
-                this.logger.info(
-                    `[ContextPool] Background preload (gen=${generation}) superseded by newer task (gen=${this._preloadGeneration}), stopping`
-                );
-                break;
-            }
-
             this.initializingContexts.add(authIndex);
             try {
-                this.logger.info(`[ContextPool] Background preload (gen=${generation}) init context #${authIndex}...`);
-                await this._initializeContext(authIndex);
+                this.logger.info(`[ContextPool] Background preload init context #${authIndex}...`);
+                await this._initializeContext(authIndex, true); // Mark as background task
                 this.logger.info(`✅ [ContextPool] Background context #${authIndex} ready.`);
             } catch (error) {
                 // Check if this is an abort error (user deleted the account during initialization)
                 const isAbortError = error.message && error.message.includes("aborted for index");
                 if (isAbortError) {
                     this.logger.info(`[ContextPool] Background context #${authIndex} aborted (account deleted)`);
+                    // If aborted due to background preload abort, mark as aborted
+                    aborted = true;
                 } else {
                     this.logger.error(`❌ [ContextPool] Background context #${authIndex} failed: ${error.message}`);
                 }
@@ -1359,9 +1394,8 @@ class BrowserManager {
             }
         }
 
-        // Only log completion if this task wasn't superseded
-        if (this._preloadGeneration === generation) {
-            this.logger.info(`[ContextPool] Background preload (gen=${generation}) complete.`);
+        if (!aborted) {
+            this.logger.info(`[ContextPool] Background preload complete.`);
         }
     }
 
@@ -1373,6 +1407,32 @@ class BrowserManager {
     async preCleanupForSwitch(targetAuthIndex) {
         const maxContexts = this.config.maxContexts;
         const isUnlimited = maxContexts === 0;
+
+        // Abort any ongoing background preload task before cleanup
+        // This prevents race conditions where background tasks continue initializing contexts
+        // that will be immediately removed by the new rebalance after switch
+        if (this._backgroundPreloadTask) {
+            this.logger.info(`[ContextPool] Pre-cleanup: aborting background preload...`);
+            this._backgroundPreloadAbort = true;
+            try {
+                await this._backgroundPreloadTask;
+            } catch (error) {
+                // Ignore errors from aborted task
+                this.logger.debug(`[ContextPool] Background preload aborted: ${error.message}`);
+            }
+            this.logger.info(`[ContextPool] Pre-cleanup: background preload aborted, proceeding with cleanup`);
+        }
+
+        // Test: Check if initializingContexts is empty after aborting background task
+        if (this.initializingContexts.size > 0) {
+            const initializingList = [...this.initializingContexts].join(", ");
+            this.logger.error(
+                `[ContextPool] Pre-cleanup ERROR: initializingContexts not empty after aborting background task! Contexts still initializing: [${initializingList}]`
+            );
+            throw new Error(
+                `Pre-cleanup failed: initializingContexts not empty (${initializingList}). This should not happen after aborting background task.`
+            );
+        }
 
         // In unlimited mode, no need to pre-cleanup
         if (isUnlimited) {
@@ -1578,12 +1638,18 @@ class BrowserManager {
      * Initialize a single context for the given auth index
      * This is a helper method used by both preloadAllContexts and launchOrSwitchContext
      * @param {number} authIndex - The auth index to initialize
+     * @param {boolean} isBackgroundTask - Whether this is a background preload task (can be aborted by _backgroundPreloadAbort)
      * @returns {Promise<{context, page}>}
      */
-    async _initializeContext(authIndex) {
+    async _initializeContext(authIndex, isBackgroundTask = false) {
         // Check if this context has been marked for abort before starting
         if (this.abortedContexts.has(authIndex)) {
             throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+        }
+
+        // Check if background preload was aborted (only for background tasks)
+        if (isBackgroundTask && this._backgroundPreloadAbort) {
+            throw new Error(`Context initialization aborted for index ${authIndex} (background preload aborted)`);
         }
 
         const proxyConfig = parseProxyFromEnv();
@@ -1603,7 +1669,7 @@ class BrowserManager {
 
         try {
             // Check abort status before expensive operations
-            if (this.abortedContexts.has(authIndex)) {
+            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
                 throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
             }
 
@@ -1615,7 +1681,7 @@ class BrowserManager {
             });
 
             // Check abort status after context creation
-            if (this.abortedContexts.has(authIndex)) {
+            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
                 throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
             }
 
@@ -1654,29 +1720,39 @@ class BrowserManager {
             });
 
             // Check abort status before navigation (most time-consuming part)
-            if (this.abortedContexts.has(authIndex)) {
+            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
                 throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
             }
 
             await this._navigateAndWakeUpPage(page, `[Context#${authIndex}]`);
 
             // Check abort status after navigation
-            if (this.abortedContexts.has(authIndex)) {
+            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
                 throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
             }
 
             await this._checkPageStatusAndErrors(page, `[Context#${authIndex}]`);
+
+            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
+                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+            }
+
             await this._handlePopups(page, `[Context#${authIndex}]`);
+
+            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
+                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+            }
+
             await this._injectScriptToEditor(page, buildScriptContent, `[Context#${authIndex}]`);
 
             // Final check before adding to contexts map
-            if (this.abortedContexts.has(authIndex)) {
+            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
                 throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
             }
 
             // Save to contexts map - with atomic abort check to prevent race condition
             // between the check above and actually adding to the map
-            if (!this.abortedContexts.has(authIndex)) {
+            if (!this.abortedContexts.has(authIndex) && !(isBackgroundTask && this._backgroundPreloadAbort)) {
                 this.contexts.set(authIndex, {
                     context,
                     healthMonitorInterval: null,
