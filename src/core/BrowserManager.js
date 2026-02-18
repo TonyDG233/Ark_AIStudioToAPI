@@ -1294,7 +1294,8 @@ class BrowserManager {
      */
     async rebalanceContextPool() {
         const maxContexts = this.config.maxContexts;
-        const poolSize = maxContexts === 0 ? 0 : maxContexts;
+        // maxContexts === 0 means unlimited pool size
+        const isUnlimited = maxContexts === 0;
 
         // Build full rotation ordered from current account
         const rotation = this.authSource.getRotationIndices();
@@ -1306,8 +1307,8 @@ class BrowserManager {
             ordered.push(rotation[(startPos + i) % rotation.length]);
         }
 
-        // Targets = first poolSize from ordered (or all if unlimited)
-        const targets = new Set(poolSize === 0 ? ordered : ordered.slice(0, poolSize));
+        // Targets = first maxContexts from ordered (or all if unlimited)
+        const targets = new Set(isUnlimited ? ordered : ordered.slice(0, maxContexts));
 
         // Remove contexts not in targets (except current)
         const toRemove = [];
@@ -1331,8 +1332,8 @@ class BrowserManager {
         }
 
         // Preload candidates if we have room in the pool
-        if (candidates.length > 0 && (poolSize === 0 || this.contexts.size < poolSize)) {
-            this._preloadBackgroundContexts(candidates, poolSize);
+        if (candidates.length > 0 && (isUnlimited || this.contexts.size < maxContexts)) {
+            this._preloadBackgroundContexts(candidates, isUnlimited ? 0 : maxContexts);
         }
     }
 
@@ -1358,6 +1359,11 @@ class BrowserManager {
      * @returns {Promise<{context, page}>}
      */
     async _initializeContext(authIndex) {
+        // Check if this context has been marked for abort before starting
+        if (this.abortedContexts.has(authIndex)) {
+            throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+        }
+
         const proxyConfig = parseProxyFromEnv();
         const storageStateObject = this.authSource.getAuth(authIndex);
         if (!storageStateObject) {
@@ -1374,12 +1380,22 @@ class BrowserManager {
         let page = null;
 
         try {
+            // Check abort status before expensive operations
+            if (this.abortedContexts.has(authIndex)) {
+                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+            }
+
             context = await this.browser.newContext({
                 deviceScaleFactor: 1,
                 storageState: storageStateObject,
                 viewport: { height: randomHeight, width: randomWidth },
                 ...(proxyConfig ? { proxy: proxyConfig } : {}),
             });
+
+            // Check abort status after context creation
+            if (this.abortedContexts.has(authIndex)) {
+                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+            }
 
             // Inject Privacy Script immediately after context creation
             const privacyScript = this._getPrivacyProtectionScript(authIndex);
@@ -1415,10 +1431,26 @@ class BrowserManager {
                 }
             });
 
+            // Check abort status before navigation (most time-consuming part)
+            if (this.abortedContexts.has(authIndex)) {
+                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+            }
+
             await this._navigateAndWakeUpPage(page, `[Context#${authIndex}]`);
+
+            // Check abort status after navigation
+            if (this.abortedContexts.has(authIndex)) {
+                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+            }
+
             await this._checkPageStatusAndErrors(page, `[Context#${authIndex}]`);
             await this._handlePopups(page, `[Context#${authIndex}]`);
             await this._injectScriptToEditor(page, buildScriptContent, `[Context#${authIndex}]`);
+
+            // Final check before adding to contexts map
+            if (this.abortedContexts.has(authIndex)) {
+                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+            }
 
             // Save to contexts map
             this.contexts.set(authIndex, {
@@ -1432,7 +1464,13 @@ class BrowserManager {
 
             return { context, page };
         } catch (error) {
-            this.logger.error(`❌ [Browser] Context initialization failed for index ${authIndex}, cleaning up...`);
+            // Check if this is an abort error
+            const isAbortError = error.message && error.message.includes("aborted for index");
+            if (isAbortError) {
+                this.logger.info(`[Browser] Context #${authIndex} initialization aborted as requested.`);
+            } else {
+                this.logger.error(`❌ [Browser] Context initialization failed for index ${authIndex}, cleaning up...`);
+            }
 
             // Remove from contexts map if it was added
             if (this.contexts.has(authIndex)) {
@@ -1444,7 +1482,11 @@ class BrowserManager {
             if (context) {
                 try {
                     await context.close();
-                    this.logger.info(`[Browser] Cleaned up leaked context for index ${authIndex}`);
+                    if (isAbortError) {
+                        this.logger.info(`[Browser] Cleaned up aborted context for index ${authIndex}`);
+                    } else {
+                        this.logger.info(`[Browser] Cleaned up leaked context for index ${authIndex}`);
+                    }
                 } catch (closeError) {
                     this.logger.warn(`[Browser] Failed to close context during cleanup: ${closeError.message}`);
                 }
