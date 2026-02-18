@@ -1380,20 +1380,28 @@ class BrowserManager {
             return;
         }
 
-        // If target context already exists, no new context will be created, so no cleanup needed
+        // If target context already exists or is being initialized, no new context will be created
         if (this.contexts.has(targetAuthIndex)) {
             this.logger.debug(`[ContextPool] Pre-cleanup skipped: target context #${targetAuthIndex} already exists`);
             return;
         }
 
+        if (this.initializingContexts.has(targetAuthIndex)) {
+            this.logger.debug(
+                `[ContextPool] Pre-cleanup skipped: target context #${targetAuthIndex} is being initialized`
+            );
+            return;
+        }
+
         // Calculate how many contexts we'll have after adding the new one
-        const currentSize = this.contexts.size;
+        // Include contexts that are currently being initialized in background
+        const currentSize = this.contexts.size + this.initializingContexts.size;
         const futureSize = currentSize + 1;
 
         // If we won't exceed the limit, no cleanup needed
         if (futureSize <= maxContexts) {
             this.logger.debug(
-                `[ContextPool] Pre-cleanup skipped: future size ${futureSize} <= maxContexts ${maxContexts}`
+                `[ContextPool] Pre-cleanup skipped: future size ${futureSize} (${this.contexts.size} ready + ${this.initializingContexts.size} initializing + 1 new) <= maxContexts ${maxContexts}`
             );
             return;
         }
@@ -1401,13 +1409,21 @@ class BrowserManager {
         // We need to remove (futureSize - maxContexts) contexts
         const removeCount = futureSize - maxContexts;
 
-        // Build priority list for removal (from lowest to highest priority to keep):
-        // 1. Duplicate accounts not in rotation (old versions) - remove first
-        // 2. Accounts in rotation but far from target - remove by reverse rotation order
+        // Build removal priority list (from lowest to highest priority to keep):
+        // Priority 1: Old duplicate accounts (removedIndices from duplicateGroups)
+        // Priority 2: Accounts in rotation, ordered by distance from target (farthest first)
 
         const rotation = this.authSource.getRotationIndices();
-        const rotationSet = new Set(rotation);
         const targetCanonical = this.authSource.getCanonicalIndex(targetAuthIndex);
+        const duplicateGroups = this.authSource.getDuplicateGroups();
+
+        // Get all old duplicate indices (not in rotation)
+        const oldDuplicates = new Set();
+        for (const group of duplicateGroups) {
+            for (const idx of group.removedIndices) {
+                oldDuplicates.add(idx);
+            }
+        }
 
         // Build rotation order starting from target (accounts closer to target have higher priority)
         const startPos = Math.max(rotation.indexOf(targetCanonical), 0);
@@ -1416,13 +1432,28 @@ class BrowserManager {
             orderedFromTarget.push(rotation[(startPos + i) % rotation.length]);
         }
 
-        // Build removal priority list (reverse order = lowest priority first)
+        // Collect all context indices (existing + initializing)
+        const allContextIndices = new Set([...this.contexts.keys(), ...this.initializingContexts]);
+
+        // Build removal priority list
         const removalPriority = [];
 
-        // Priority 1: Duplicate accounts not in rotation (lowest priority to keep)
-        for (const idx of this.contexts.keys()) {
-            const canonical = this.authSource.getCanonicalIndex(idx);
-            if (!rotationSet.has(canonical)) {
+        // Special case: If target is an old duplicate, prioritize removing its canonical version
+        // Because we're about to create the old duplicate, and they're the same account
+        const isTargetOldDuplicate = oldDuplicates.has(targetAuthIndex);
+        if (isTargetOldDuplicate) {
+            // Find the canonical version of target in existing contexts
+            for (const idx of allContextIndices) {
+                if (this.authSource.getCanonicalIndex(idx) === targetCanonical && idx === targetCanonical) {
+                    removalPriority.push(idx);
+                    break;
+                }
+            }
+        }
+
+        // Priority 1: Old duplicate accounts (lowest priority to keep)
+        for (const idx of allContextIndices) {
+            if (oldDuplicates.has(idx) && !removalPriority.includes(idx)) {
                 removalPriority.push(idx);
             }
         }
@@ -1430,8 +1461,8 @@ class BrowserManager {
         // Priority 2: Accounts in rotation, from farthest to closest (reverse rotation order)
         for (let i = orderedFromTarget.length - 1; i >= 0; i--) {
             const canonical = orderedFromTarget[i];
-            // Find all contexts with this canonical index (including duplicates in rotation)
-            for (const idx of this.contexts.keys()) {
+            // Find all contexts with this canonical index
+            for (const idx of allContextIndices) {
                 if (this.authSource.getCanonicalIndex(idx) === canonical && !removalPriority.includes(idx)) {
                     removalPriority.push(idx);
                 }
@@ -1442,7 +1473,7 @@ class BrowserManager {
         const toRemove = removalPriority.slice(0, removeCount);
 
         this.logger.info(
-            `[ContextPool] Pre-cleanup: removing ${toRemove.length} contexts before switch to #${targetAuthIndex}: [${toRemove}]`
+            `[ContextPool] Pre-cleanup: removing ${toRemove.length} contexts before switch to #${targetAuthIndex}: [${toRemove}] (${this.contexts.size} ready + ${this.initializingContexts.size} initializing)`
         );
 
         for (const idx of toRemove) {
