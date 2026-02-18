@@ -1389,9 +1389,8 @@ class BrowserManager {
                 } else {
                     this.logger.error(`❌ [ContextPool] Background context #${authIndex} failed: ${error.message}`);
                 }
-            } finally {
-                this.initializingContexts.delete(authIndex);
             }
+            // Note: initializingContexts and abortedContexts cleanup is handled in _initializeContext's finally block
         }
 
         if (!aborted) {
@@ -1636,7 +1635,7 @@ class BrowserManager {
 
     /**
      * Initialize a single context for the given auth index
-     * This is a helper method used by both preloadAllContexts and launchOrSwitchContext
+     * This is a helper method used by both preloadContextPool and launchOrSwitchContext
      * @param {number} authIndex - The auth index to initialize
      * @param {boolean} isBackgroundTask - Whether this is a background preload task (can be aborted by _backgroundPreloadAbort)
      * @returns {Promise<{context, page}>}
@@ -1795,6 +1794,10 @@ class BrowserManager {
                 }
             }
             throw error;
+        } finally {
+            // Ensure cleanup of tracking sets even if error is thrown
+            this.initializingContexts.delete(authIndex);
+            this.abortedContexts.delete(authIndex);
         }
     }
 
@@ -1908,6 +1911,18 @@ class BrowserManager {
         this.logger.info(`🔄 [Browser] Context for account #${authIndex} not found, initializing...`);
         this.logger.info("==================================================");
 
+        // Check again if another caller started initializing while we were checking
+        // This protects against race condition where multiple callers finish waiting
+        // at the same time and all try to initialize the same context
+        if (this.initializingContexts.has(authIndex)) {
+            this.logger.info(`[Browser] Another caller is initializing context #${authIndex}, waiting...`);
+            await this._waitForContextInit(authIndex);
+            // After waiting, recursively call to use the fast path or retry
+            return await this.launchOrSwitchContext(authIndex);
+        }
+
+        this.initializingContexts.add(authIndex);
+
         try {
             // Stop background tasks for old context
             if (this._currentAuthIndex >= 0 && this.contexts.has(this._currentAuthIndex)) {
@@ -1918,8 +1933,8 @@ class BrowserManager {
                 }
             }
 
-            // Initialize new context
-            const { context, page } = await this._initializeContext(authIndex);
+            // Initialize new context (isBackgroundTask=false for foreground initialization)
+            const { context, page } = await this._initializeContext(authIndex, false);
 
             // Update current references
             this.context = context;

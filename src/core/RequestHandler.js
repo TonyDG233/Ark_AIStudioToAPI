@@ -254,6 +254,9 @@ class RequestHandler {
 
             if (wasDirectRecovery && this.authSource.getRotationIndices().length > 1) {
                 this.logger.warn("⚠️ [System] Attempting to switch to alternative account...");
+                // Reset isSystemBusy before calling switchToNextAuth to avoid "already in progress" rejection
+                this.authSwitcher.isSystemBusy = false;
+                wasDirectRecovery = false; // Prevent finally block from resetting again
                 try {
                     const result = await this.authSwitcher.switchToNextAuth();
                     if (!result.success) {
