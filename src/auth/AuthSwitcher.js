@@ -128,6 +128,8 @@ class AuthSwitcher {
                 );
 
                 try {
+                    // Pre-cleanup: remove excess contexts BEFORE creating new one to avoid exceeding maxContexts
+                    await this.browserManager.preCleanupForSwitch(accountIndex);
                     await this.browserManager.switchAccount(accountIndex);
                     this.resetCounters();
                     this.browserManager.rebalanceContextPool();
@@ -159,6 +161,8 @@ class AuthSwitcher {
                 this.logger.warn("==================================================");
 
                 try {
+                    // Pre-cleanup: remove excess contexts BEFORE creating new one to avoid exceeding maxContexts
+                    await this.browserManager.preCleanupForSwitch(originalStartAccount);
                     await this.browserManager.switchAccount(originalStartAccount);
                     this.resetCounters();
                     this.browserManager.rebalanceContextPool();
@@ -216,6 +220,8 @@ class AuthSwitcher {
         this.isSystemBusy = true;
         try {
             this.logger.info(`🔄 [Auth] Starting switch to specified account #${targetIndex}...`);
+            // Pre-cleanup: remove excess contexts BEFORE creating new one to avoid exceeding maxContexts
+            await this.browserManager.preCleanupForSwitch(targetIndex);
             await this.browserManager.switchAccount(targetIndex);
             this.resetCounters();
             this.browserManager.rebalanceContextPool();
