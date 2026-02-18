@@ -340,14 +340,14 @@ class BrowserManager {
             'button span:has-text("Code")',
         ];
 
-        this.logger.info('[Browser] Trying to locate "Code" entry point using smart selectors...');
+        this.logger.debug('[Browser] Trying to locate "Code" entry point using smart selectors...');
 
         for (const selector of selectors) {
             try {
                 // Use a short timeout for quick fail-over
                 const element = page.locator(selector).first();
                 if (await element.isVisible({ timeout: 2000 })) {
-                    this.logger.info(`[Browser] ✅ Smart match: "${selector}", clicking...`);
+                    this.logger.debug(`[Browser] ✅ Smart match: "${selector}", clicking...`);
                     // Direct click with force as per new logic
                     await element.click({ force: true, timeout: 10000 });
                     return true;
@@ -465,7 +465,7 @@ class BrowserManager {
      * @param {string} logPrefix - Log prefix for step messages (e.g., "[Browser]" or "[Reconnect]")
      */
     async _injectScriptToEditor(page, buildScriptContent, logPrefix = "[Browser]") {
-        this.logger.info(`${logPrefix} Preparing UI interaction, forcefully removing all possible overlay layers...`);
+        this.logger.debug(`${logPrefix} Preparing UI interaction, forcefully removing all possible overlay layers...`);
         /* eslint-disable no-undef */
         await page.evaluate(() => {
             const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
@@ -476,11 +476,11 @@ class BrowserManager {
         });
         /* eslint-enable no-undef */
 
-        this.logger.info(`${logPrefix} (Step 1/5) Preparing to click "Code" button...`);
+        this.logger.debug(`${logPrefix} (Step 1/5) Preparing to click "Code" button...`);
         const maxTimes = 15;
         for (let i = 1; i <= maxTimes; i++) {
             try {
-                this.logger.info(`  [Attempt ${i}/${maxTimes}] Cleaning overlay layers and clicking...`);
+                this.logger.debug(`  [Attempt ${i}/${maxTimes}] Cleaning overlay layers and clicking...`);
                 /* eslint-disable no-undef */
                 await page.evaluate(() => {
                     document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
@@ -491,7 +491,7 @@ class BrowserManager {
                 // Use Smart Click instead of hardcoded locator
                 await this._smartClickCode(page);
 
-                this.logger.info("  ✅ Click successful!");
+                this.logger.debug("  ✅ Click successful!");
                 break;
             } catch (error) {
                 this.logger.warn(`  [Attempt ${i}/${maxTimes}] Click failed: ${error.message.split("\n")[0]}`);
@@ -501,7 +501,7 @@ class BrowserManager {
             }
         }
 
-        this.logger.info(
+        this.logger.debug(
             `${logPrefix} (Step 2/5) "Code" button clicked successfully, waiting for editor to become visible...`
         );
         const editorContainerLocator = page.locator("div.monaco-editor").first();
@@ -510,7 +510,7 @@ class BrowserManager {
             timeout: 60000,
         });
 
-        this.logger.info(
+        this.logger.debug(
             `${logPrefix} (Cleanup #2) Preparing to click editor, forcefully removing all possible overlay layers again...`
         );
         /* eslint-disable no-undef */
@@ -526,7 +526,7 @@ class BrowserManager {
         /* eslint-enable no-undef */
         await page.waitForTimeout(250);
 
-        this.logger.info(`${logPrefix} (Step 3/5) Editor displayed, focusing and pasting script...`);
+        this.logger.debug(`${logPrefix} (Step 3/5) Editor displayed, focusing and pasting script...`);
         await editorContainerLocator.click({ timeout: 30000 });
 
         /* eslint-disable no-undef */
@@ -535,13 +535,13 @@ class BrowserManager {
         const isMac = os.platform() === "darwin";
         const pasteKey = isMac ? "Meta+V" : "Control+V";
         await page.keyboard.press(pasteKey);
-        this.logger.info(`${logPrefix} (Step 4/5) Script pasted.`);
-        this.logger.info(`${logPrefix} (Step 5/5) Clicking "Preview" button to activate script...`);
+        this.logger.debug(`${logPrefix} (Step 4/5) Script pasted.`);
+        this.logger.debug(`${logPrefix} (Step 5/5) Clicking "Preview" button to activate script...`);
         await page.locator('button:text("Preview")').click();
-        this.logger.info(`${logPrefix} ✅ UI interaction complete, script is now running.`);
+        this.logger.debug(`${logPrefix} ✅ UI interaction complete, script is now running.`);
 
         // Active Trigger (Hack to wake up Google Backend)
-        this.logger.info(`${logPrefix} ⚡ Sending active trigger request to Launch flow...`);
+        this.logger.debug(`${logPrefix} ⚡ Sending active trigger request to Launch flow...`);
         try {
             await page.evaluate(async () => {
                 try {
@@ -565,14 +565,14 @@ class BrowserManager {
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
      */
     async _navigateAndWakeUpPage(page, logPrefix = "[Browser]") {
-        this.logger.info(`${logPrefix} Navigating to target page...`);
+        this.logger.debug(`${logPrefix} Navigating to target page...`);
         const targetUrl =
             "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showCode=true&showAssistant=true";
         await page.goto(targetUrl, {
             timeout: 180000,
             waitUntil: "domcontentloaded",
         });
-        this.logger.info(`${logPrefix} Page loaded.`);
+        this.logger.debug(`${logPrefix} Page loaded.`);
 
         // Wake up window using JS and Human Movement
         try {
@@ -592,7 +592,7 @@ class BrowserManager {
             await page.waitForTimeout(50 + Math.random() * 100);
             await page.mouse.up();
 
-            this.logger.info(`${logPrefix} ✅ Executed realistic page activation (Random -> 1,1 Click).`);
+            this.logger.debug(`${logPrefix} ✅ Executed realistic page activation (Random -> 1,1 Click).`);
         } catch (e) {
             this.logger.warn(`${logPrefix} Wakeup minor error: ${e.message}`);
         }
@@ -615,8 +615,8 @@ class BrowserManager {
             this.logger.warn(`${logPrefix} Unable to get page title: ${e.message}`);
         }
 
-        this.logger.info(`${logPrefix} [Diagnostic] URL: ${currentUrl}`);
-        this.logger.info(`${logPrefix} [Diagnostic] Title: "${pageTitle}"`);
+        this.logger.debug(`${logPrefix} [Diagnostic] URL: ${currentUrl}`);
+        this.logger.debug(`${logPrefix} [Diagnostic] Title: "${pageTitle}"`);
 
         // Check for various error conditions
         if (
@@ -652,7 +652,7 @@ class BrowserManager {
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
      */
     async _handlePopups(page, logPrefix = "[Browser]") {
-        this.logger.info(`${logPrefix} 🔍 Starting intelligent popup detection (max 6s)...`);
+        this.logger.debug(`${logPrefix} 🔍 Starting intelligent popup detection (max 6s)...`);
 
         const popupConfigs = [
             {
@@ -692,7 +692,7 @@ class BrowserManager {
                     const element = page.locator(popup.selector).first();
                     // Quick visibility check with very short timeout
                     if (await element.isVisible({ timeout: 200 })) {
-                        this.logger.info(popup.logFound);
+                        this.logger.debug(popup.logFound);
                         await element.click({ force: true });
                         handledPopups.add(popup.name);
                         foundAny = true;
@@ -732,7 +732,7 @@ class BrowserManager {
             // 1. Must have completed minimum iterations (ensure slow popups have time to load)
             // 2. Consecutive idle count exceeds threshold (no new popups appearing)
             if (i >= minIterations - 1 && consecutiveIdleCount >= idleThreshold) {
-                this.logger.info(
+                this.logger.debug(
                     `${logPrefix} ✅ Popup detection complete (${i + 1} iterations, ${handledPopups.size} popups handled)`
                 );
                 break;
@@ -1302,19 +1302,21 @@ class BrowserManager {
         const generation = ++this._preloadGeneration;
 
         this.logger.info(
-            `[ContextPool] Background preload #${generation} starting for [${indices.join(", ")}] (poolCap=${maxPoolSize || "unlimited"})...`
+            `[ContextPool] Background preload (gen=${generation}) starting for [${indices.join(", ")}] (poolCap=${maxPoolSize || "unlimited"})...`
         );
 
         for (const authIndex of indices) {
             // Check if browser is still available
             if (!this.browser) {
-                this.logger.info(`[ContextPool] Background preload #${generation} stopped: browser is not available`);
+                this.logger.info(
+                    `[ContextPool] Background preload (gen=${generation}) stopped: browser is not available`
+                );
                 break;
             }
 
             // Check pool size limit
             if (maxPoolSize > 0 && this.contexts.size >= maxPoolSize) {
-                this.logger.info(`[ContextPool] Pool size limit reached, stopping preload #${generation}`);
+                this.logger.info(`[ContextPool] Pool size limit reached, stopping preload (gen=${generation})`);
                 break;
             }
 
@@ -1334,14 +1336,14 @@ class BrowserManager {
             // This allows the current initialization to complete even if superseded
             if (this._preloadGeneration !== generation) {
                 this.logger.info(
-                    `[ContextPool] Background preload #${generation} superseded by newer task #${this._preloadGeneration}, stopping`
+                    `[ContextPool] Background preload (gen=${generation}) superseded by newer task (gen=${this._preloadGeneration}), stopping`
                 );
                 break;
             }
 
             this.initializingContexts.add(authIndex);
             try {
-                this.logger.info(`[ContextPool] Background preload #${generation} init context #${authIndex}...`);
+                this.logger.info(`[ContextPool] Background preload (gen=${generation}) init context #${authIndex}...`);
                 await this._initializeContext(authIndex);
                 this.logger.info(`✅ [ContextPool] Background context #${authIndex} ready.`);
             } catch (error) {
@@ -1359,7 +1361,7 @@ class BrowserManager {
 
         // Only log completion if this task wasn't superseded
         if (this._preloadGeneration === generation) {
-            this.logger.info(`[ContextPool] Background preload #${generation} complete.`);
+            this.logger.info(`[ContextPool] Background preload (gen=${generation}) complete.`);
         }
     }
 

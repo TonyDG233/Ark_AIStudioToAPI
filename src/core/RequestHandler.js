@@ -697,7 +697,7 @@ class RequestHandler {
             this.connectionRegistry.removeMessageQueue(requestId);
             if (this.needsSwitchingAfterRequest) {
                 this.logger.info(
-                    `[Auth] Rotation count reached switching threshold, will automatically switch account in background...`
+                    `[Auth] Rotation count reached switching threshold (${this.authSwitcher.usageCount}/${this.config.switchOnUses}), will automatically switch account in background...`
                 );
                 this.authSwitcher.switchToNextAuth().catch(err => {
                     this.logger.error(`[Auth] Background account switching task failed: ${err.message}`);
@@ -936,7 +936,7 @@ class RequestHandler {
             this.connectionRegistry.removeMessageQueue(requestId);
             if (this.needsSwitchingAfterRequest) {
                 this.logger.info(
-                    `[Auth] Rotation count reached switching threshold, will automatically switch account in background...`
+                    `[Auth] Rotation count reached switching threshold (${this.authSwitcher.usageCount}/${this.config.switchOnUses}), will automatically switch account in background...`
                 );
                 this.authSwitcher.switchToNextAuth().catch(err => {
                     this.logger.error(`[Auth] Background account switching task failed: ${err.message}`);

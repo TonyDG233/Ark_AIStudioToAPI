@@ -210,7 +210,7 @@ class RequestProcessor {
 
         const attemptPromise = (async () => {
             try {
-                Logger.output(`Executing request:`, requestSpec.method, requestSpec.path);
+                Logger.debug(`Executing request:`, requestSpec.method, requestSpec.path);
 
                 const requestUrl = this._constructUrl(requestSpec);
                 const requestConfig = this._buildRequestConfig(requestSpec, abortController.signal);
@@ -583,7 +583,7 @@ class ProxySystem extends EventTarget {
     async _processProxyRequest(requestSpec) {
         const operationId = requestSpec.request_id;
         const mode = requestSpec.streaming_mode || "fake";
-        Logger.output(`Browser received request`);
+        Logger.debug(`Browser received request`);
         let cancelTimeout;
 
         try {
