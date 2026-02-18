@@ -1614,7 +1614,10 @@ class BrowserManager {
         const activeContexts = new Set(
             [...activeContextsRaw].map(idx => this.authSource.getCanonicalIndex(idx) ?? idx)
         );
-        const candidates = ordered.filter(idx => !activeContexts.has(idx) && !this.initializingContexts.has(idx));
+        // Don't filter out initializingContexts here - let _executePreloadTask handle it
+        // This ensures that if a background task is aborted, the account will be retried
+        // If a foreground task is running, _executePreloadTask will skip it (line 1382)
+        const candidates = ordered.filter(idx => !activeContexts.has(idx));
 
         this.logger.info(
             `[ContextPool] Rebalance: targets=[${[...targets]}], remove=[${toRemove}], candidates=[${candidates}]`
