@@ -242,6 +242,11 @@ class StatusRoutes {
                     });
                 }
 
+                // Reload auth sources to update internal state immediately after dedup deletions
+                if (removedIndices.length > 0) {
+                    authSource.reloadAuthSources();
+                }
+
                 // Rebalance context pool after dedup
                 if (removedIndices.length > 0) {
                     this.serverSystem.browserManager.rebalanceContextPool();
@@ -314,6 +319,11 @@ class StatusRoutes {
                     failedIndices.push({ error: error.message, index: targetIndex });
                     this.logger.error(`[WebUI] Failed to delete account #${targetIndex}: ${error.message}`);
                 }
+            }
+
+            // Reload auth sources to update internal state immediately after deletions
+            if (successIndices.length > 0) {
+                authSource.reloadAuthSources();
             }
 
             // If current active account was deleted, close context first, then connection
@@ -478,6 +488,9 @@ class StatusRoutes {
 
             try {
                 authSource.removeAuth(targetIndex);
+
+                // Reload auth sources to update internal state immediately
+                authSource.reloadAuthSources();
 
                 // Always close context first, then connection
                 this.logger.info(`[WebUI] Account #${targetIndex} deleted. Closing context and connection...`);
@@ -673,6 +686,7 @@ class StatusRoutes {
             logs: displayLogs.join("\n"),
             status: {
                 accountDetails,
+                activeContextsCount: browserManager.contexts.size,
                 apiKeySource: config.apiKeySource,
                 browserConnected: !!this.serverSystem.connectionRegistry.getConnectionByAuth(currentAuthIndex),
                 currentAccountName,
@@ -691,6 +705,7 @@ class StatusRoutes {
                 invalidIndicesRaw: invalidIndices,
                 isSystemBusy: requestHandler.isSystemBusy,
                 logMaxCount: limit,
+                maxContexts: config.maxContexts,
                 rotationIndicesRaw: rotationIndices,
                 streamingMode: this.serverSystem.streamingMode,
                 usageCount,

@@ -1219,6 +1219,12 @@ class BrowserManager {
             return { firstReady: null };
         }
 
+        // Early return if pool size is 1 (single context mode) - no need for background preload
+        if (poolSize === 1) {
+            this.logger.info(`[ContextPool] Single context mode (maxContexts=1), skipping background preload.`);
+            return { firstReady };
+        }
+
         // Background: calculate remaining contexts using rotation order (same logic as rebalanceContextPool)
         // This ensures startup pool matches the rotation order used during account switching
         const rotation = this.authSource.getRotationIndices();
@@ -1376,11 +1382,18 @@ class BrowserManager {
             ordered.push(rotation[(startPos + i) % rotation.length]);
         }
 
-        // Targets = first maxContexts from ordered (or all if unlimited)
-        const targets = new Set(isUnlimited ? ordered : ordered.slice(0, maxContexts));
+        // Targets = first maxContexts from ordered (or all available if unlimited)
+        // In unlimited mode, include all valid accounts (rotation + duplicates)
+        let targets;
+        if (isUnlimited) {
+            targets = new Set(this.authSource.availableIndices);
+        } else {
+            targets = new Set(ordered.slice(0, maxContexts));
+        }
 
         // Remove contexts not in targets (except current)
         // Special handling: if current account is a duplicate (old version), also remove its canonical version
+        // BUT only in limited mode - in unlimited mode, keep all contexts
         const toRemove = [];
         const currentCanonicalIndex = currentCanonical; // Already calculated above
         const isDuplicateAccount =
@@ -1392,8 +1405,8 @@ class BrowserManager {
             // Skip current account
             if (idx === this._currentAuthIndex) continue;
 
-            // If current is a duplicate, also remove the canonical version (we're using the old one)
-            if (isDuplicateAccount && idx === currentCanonicalIndex) {
+            // If current is a duplicate AND we're in limited mode, remove the canonical version (we're using the old one)
+            if (!isUnlimited && isDuplicateAccount && idx === currentCanonicalIndex) {
                 toRemove.push(idx);
                 continue;
             }
@@ -1543,12 +1556,17 @@ class BrowserManager {
                 throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
             }
 
-            // Save to contexts map
-            this.contexts.set(authIndex, {
-                context,
-                healthMonitorInterval: null,
-                page,
-            });
+            // Save to contexts map - with atomic abort check to prevent race condition
+            // between the check above and actually adding to the map
+            if (!this.abortedContexts.has(authIndex)) {
+                this.contexts.set(authIndex, {
+                    context,
+                    healthMonitorInterval: null,
+                    page,
+                });
+            } else {
+                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+            }
 
             // Update auth file
             await this._updateAuthFile(authIndex);

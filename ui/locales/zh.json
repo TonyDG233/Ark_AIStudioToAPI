@@ -16,6 +16,7 @@
     "accountSwitchSuccess": "切换成功！账号 {newIndex} 已激活。",
     "accountSwitchSuccessNext": "切换成功！已切换到账号 {newIndex}。",
     "actionsPanel": "设置",
+    "activeContexts": "同时登录的账号",
     "alreadyCurrentAccount": "当前已是该账号，无需切换。",
     "apiKey": "API 密钥",
     "apiKeyPlaceholder": "API 密钥",

@@ -347,6 +347,27 @@
                                 </span>
                                 <span class="value">{{ dedupedAvailableCount }}</span>
                             </div>
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px"
+                                    >
+                                        <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                                        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                                    </svg>
+                                    {{ t("activeContexts") }}
+                                </span>
+                                <span class="value">{{ activeContextsDisplay }}</span>
+                            </div>
                         </div>
                     </div>
 
@@ -1475,6 +1496,7 @@ const { theme, setTheme } = useTheme();
 
 const state = reactive({
     accountDetails: [],
+    activeContextsCount: 0,
     apiKeySource: "",
     browserConnected: false,
     currentAuthIndex: -1,
@@ -1494,6 +1516,7 @@ const state = reactive({
     logMaxCount: 100,
     logs: t("loading"),
     logScrollTop: 0,
+    maxContexts: 1,
     releaseUrl: null,
     selectedAccounts: new Set(), // Selected account indices
     serviceConnected: false,
@@ -1522,6 +1545,13 @@ const totalScannedCount = computed(() => state.accountDetails.length);
 // Deduped available accounts count (excluding duplicates and invalid)
 const dedupedAvailableCount = computed(() => {
     return state.accountDetails.filter(acc => !acc.isDuplicate && !acc.isInvalid).length;
+});
+
+// Active contexts display (e.g., "1 / 3" or "1 / ∞")
+const activeContextsDisplay = computed(() => {
+    const active = state.activeContextsCount;
+    const max = state.maxContexts;
+    return max === 0 ? `${active} / ∞` : `${active} / ${max}`;
 });
 
 const isBusy = computed(() => state.isSwitchingAccount || state.isSystemBusy);
@@ -2137,6 +2167,8 @@ const updateStatus = data => {
     state.debugModeEnabled = isEnabled(data.status.debugMode);
     state.currentAuthIndex = data.status.currentAuthIndex;
     state.accountDetails = data.status.accountDetails || [];
+    state.activeContextsCount = data.status.activeContextsCount || 0;
+    state.maxContexts = data.status.maxContexts ?? 1;
 
     const validIndices = new Set(state.accountDetails.map(acc => acc.index));
     for (const idx of state.selectedAccounts) {

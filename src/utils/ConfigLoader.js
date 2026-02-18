@@ -53,7 +53,7 @@ class ConfigLoader {
             config.retryDelay = Math.max(50, parseInt(process.env.RETRY_DELAY, 10)) || config.retryDelay;
         if (process.env.WS_PORT) config.wsPort = parseInt(process.env.WS_PORT, 10) || config.wsPort;
         if (process.env.MAX_CONTEXTS !== undefined)
-            config.maxContexts = Math.max(0, parseInt(process.env.MAX_CONTEXTS, 10)) || config.maxContexts;
+            config.maxContexts = Math.max(0, parseInt(process.env.MAX_CONTEXTS, 10)) ?? config.maxContexts;
         if (process.env.CAMOUFOX_EXECUTABLE_PATH) config.browserExecutablePath = process.env.CAMOUFOX_EXECUTABLE_PATH;
         if (process.env.API_KEYS) {
             config.apiKeys = process.env.API_KEYS.split(",");

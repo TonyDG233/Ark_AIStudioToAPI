@@ -16,6 +16,7 @@
     "accountSwitchSuccess": "Switch successful! Account #{newIndex} activated.",
     "accountSwitchSuccessNext": "Switch successful! Switched to account #{newIndex}.",
     "actionsPanel": "Settings",
+    "activeContexts": "Concurrent Logins",
     "alreadyCurrentAccount": "This is already the current active account.",
     "apiKey": "API Key",
     "apiKeyPlaceholder": "API Key",
