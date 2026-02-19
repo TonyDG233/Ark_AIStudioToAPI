@@ -735,6 +735,100 @@ class StatusRoutes {
             }
         });
 
+        // Batch upload files
+        app.post("/api/files/batch", isAuthenticated, async (req, res) => {
+            const { files } = req.body;
+
+            if (!Array.isArray(files) || files.length === 0) {
+                return res.status(400).json({ error: "Missing files array" });
+            }
+
+            try {
+                // Abort any ongoing background preload task before batch upload
+                // This prevents race conditions where background tasks continue initializing contexts
+                // while we're adding multiple new accounts
+                const browserManager = this.serverSystem.browserManager;
+                if (browserManager._backgroundPreloadTask) {
+                    this.logger.info(`[WebUI] Aborting background preload before batch upload...`);
+                    browserManager._backgroundPreloadAbort = true;
+                    try {
+                        await browserManager._backgroundPreloadTask;
+                    } catch (error) {
+                        // Ignore errors from aborted task
+                        this.logger.debug(`[WebUI] Background preload aborted: ${error.message}`);
+                    }
+                    this.logger.info(`[WebUI] Background preload aborted, proceeding with batch upload`);
+                }
+
+                // Ensure directory exists
+                const configDir = path.join(process.cwd(), "configs", "auth");
+                if (!fs.existsSync(configDir)) {
+                    fs.mkdirSync(configDir, { recursive: true });
+                }
+
+                const results = [];
+
+                // Get starting index
+                const existingIndices = this.serverSystem.authSource.availableIndices || [];
+                let nextAuthIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0;
+
+                // Write all files first, track each file's result
+                for (let i = 0; i < files.length; i++) {
+                    const content = files[i];
+
+                    if (!content) {
+                        results.push({ error: "Missing content", index: i, success: false });
+                        continue;
+                    }
+
+                    try {
+                        // If content is object, stringify it
+                        const fileContent = typeof content === "object" ? JSON.stringify(content, null, 2) : content;
+
+                        const newFilename = `auth-${nextAuthIndex}.json`;
+                        const filePath = path.join(configDir, newFilename);
+
+                        fs.writeFileSync(filePath, fileContent);
+
+                        results.push({ filename: newFilename, index: i, success: true });
+                        this.logger.info(`[WebUI] Batch upload: generated ${newFilename}`);
+
+                        nextAuthIndex++;
+                    } catch (error) {
+                        results.push({ error: error.message, index: i, success: false });
+                        this.logger.error(`[WebUI] Batch upload failed for file ${i}: ${error.message}`);
+                    }
+                }
+
+                // Only reload and rebalance once after all files are written
+                const successCount = results.filter(r => r.success).length;
+                if (successCount > 0) {
+                    this.serverSystem.authSource.reloadAuthSources();
+                    this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                        this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
+                    });
+                }
+
+                const failureCount = results.length - successCount;
+                if (failureCount > 0) {
+                    return res.status(207).json({
+                        message: "Batch upload partially successful",
+                        results,
+                        successCount,
+                    });
+                }
+
+                res.status(200).json({
+                    message: "Batch upload successful",
+                    results,
+                    successCount,
+                });
+            } catch (error) {
+                this.logger.error(`[WebUI] Batch upload failed: ${error.message}`);
+                res.status(500).json({ error: "Failed to upload files" });
+            }
+        });
+
         app.get("/api/files/:filename", isAuthenticated, (req, res) => {
             const filename = req.params.filename;
             // Security check

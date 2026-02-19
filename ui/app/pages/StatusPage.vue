@@ -2371,12 +2371,88 @@ const handleFileUpload = async event => {
     const successFiles = [];
     const failedFiles = [...extractErrors];
 
-    for (const fileData of jsonFilesToUpload) {
-        const result = await uploadFile(fileData);
-        if (result.success) {
-            successFiles.push({ local: fileData.name, saved: result.filename });
-        } else {
-            failedFiles.push({ local: fileData.name, reason: result.error });
+    // Use batch upload API if multiple files, otherwise use single file upload
+    if (jsonFilesToUpload.length > 1) {
+        // Batch upload
+        const parsedFiles = [];
+        const parseErrors = [];
+
+        // Parse all files first and track original indices
+        for (let i = 0; i < jsonFilesToUpload.length; i++) {
+            const fileData = jsonFilesToUpload[i];
+            try {
+                const parsed = JSON.parse(fileData.content);
+                parsedFiles.push({ content: parsed, name: fileData.name, originalIndex: i });
+            } catch (err) {
+                parseErrors.push({ local: fileData.name, reason: t("invalidJson") });
+            }
+        }
+
+        failedFiles.push(...parseErrors);
+
+        // Upload all valid files in one batch
+        if (parsedFiles.length > 0) {
+            try {
+                const res = await fetch("/api/files/batch", {
+                    body: JSON.stringify({ files: parsedFiles.map(f => f.content) }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                });
+
+                if (res.ok || res.status === 207) {
+                    const data = await res.json();
+                    // Process results array with proper index mapping
+                    if (data.results && Array.isArray(data.results)) {
+                        for (const result of data.results) {
+                            const originalFile = parsedFiles[result.index];
+                            if (result.success) {
+                                successFiles.push({
+                                    local: originalFile?.name || `file-${result.index}`,
+                                    saved: result.filename || originalFile?.name || `file-${result.index}`,
+                                });
+                            } else {
+                                failedFiles.push({
+                                    local: originalFile?.name || `file-${result.index}`,
+                                    reason: result.error || t("unknownError"),
+                                });
+                            }
+                        }
+                    }
+                } else {
+                    // Batch upload failed completely
+                    let errorMsg = t("unknownError");
+                    try {
+                        const data = await res.json();
+                        if (data.error) errorMsg = data.error;
+                    } catch (e) {
+                        if (res.statusText) {
+                            errorMsg = `HTTP Error ${res.status}: ${res.statusText}`;
+                        } else {
+                            errorMsg = `HTTP Error ${res.status}`;
+                        }
+                    }
+                    // Mark all parsed files as failed
+                    for (const fileData of parsedFiles) {
+                        failedFiles.push({ local: fileData.name, reason: errorMsg });
+                    }
+                }
+            } catch (error) {
+                // Network or other error - mark all parsed files as failed
+                // (parseErrors are already in failedFiles)
+                for (const fileData of parsedFiles) {
+                    failedFiles.push({ local: fileData.name, reason: error.message || t("networkError") });
+                }
+            }
+        }
+    } else {
+        // Single file upload (use existing logic)
+        for (const fileData of jsonFilesToUpload) {
+            const result = await uploadFile(fileData);
+            if (result.success) {
+                successFiles.push({ local: fileData.name, saved: result.filename });
+            } else {
+                failedFiles.push({ local: fileData.name, reason: result.error });
+            }
         }
     }
 
