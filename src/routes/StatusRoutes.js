@@ -220,18 +220,7 @@ class StatusRoutes {
                 // Abort any ongoing background preload task before deletion
                 // This prevents race conditions where background tasks continue initializing contexts
                 // that are about to be deleted
-                const browserManager = this.serverSystem.browserManager;
-                if (browserManager._backgroundPreloadTask) {
-                    this.logger.info(`[Auth] Aborting background preload before dedup cleanup...`);
-                    browserManager._backgroundPreloadAbort = true;
-                    try {
-                        await browserManager._backgroundPreloadTask;
-                    } catch (error) {
-                        // Ignore errors from aborted task
-                        this.logger.debug(`[Auth] Background preload aborted: ${error.message}`);
-                    }
-                    this.logger.info(`[Auth] Background preload aborted, proceeding with dedup cleanup`);
-                }
+                await this.serverSystem.browserManager.abortBackgroundPreload();
 
                 // Delete duplicate auth files
                 for (const group of duplicateGroups) {
@@ -272,7 +261,7 @@ class StatusRoutes {
                 if (removedIndices.length > 0) {
                     for (const idx of removedIndices) {
                         try {
-                            await browserManager.closeContext(idx);
+                            await this.serverSystem.browserManager.closeContext(idx);
                             this.serverSystem.connectionRegistry.closeConnectionByAuth(idx);
                         } catch (error) {
                             this.logger.warn(
@@ -350,18 +339,7 @@ class StatusRoutes {
             // Abort any ongoing background preload task before deletion
             // This prevents race conditions where background tasks continue initializing contexts
             // that are about to be deleted
-            const browserManager = this.serverSystem.browserManager;
-            if (browserManager._backgroundPreloadTask) {
-                this.logger.info(`[WebUI] Aborting background preload before batch delete...`);
-                browserManager._backgroundPreloadAbort = true;
-                try {
-                    await browserManager._backgroundPreloadTask;
-                } catch (error) {
-                    // Ignore errors from aborted task
-                    this.logger.debug(`[WebUI] Background preload aborted: ${error.message}`);
-                }
-                this.logger.info(`[WebUI] Background preload aborted, proceeding with batch delete`);
-            }
+            await this.serverSystem.browserManager.abortBackgroundPreload();
 
             // Delete auth files
             for (const targetIndex of validIndices) {
@@ -557,18 +535,7 @@ class StatusRoutes {
             // Abort any ongoing background preload task before deletion
             // This prevents race conditions where background tasks continue initializing contexts
             // that are about to be deleted
-            const browserManager = this.serverSystem.browserManager;
-            if (browserManager._backgroundPreloadTask) {
-                this.logger.info(`[WebUI] Aborting background preload before deleting account #${targetIndex}...`);
-                browserManager._backgroundPreloadAbort = true;
-                try {
-                    await browserManager._backgroundPreloadTask;
-                } catch (error) {
-                    // Ignore errors from aborted task
-                    this.logger.debug(`[WebUI] Background preload aborted: ${error.message}`);
-                }
-                this.logger.info(`[WebUI] Background preload aborted, proceeding with account deletion`);
-            }
+            await this.serverSystem.browserManager.abortBackgroundPreload();
 
             try {
                 // Delete auth file
@@ -703,18 +670,7 @@ class StatusRoutes {
                 // Abort any ongoing background preload task before upload
                 // This prevents race conditions where background tasks continue initializing contexts
                 // while we're adding a new account
-                const browserManager = this.serverSystem.browserManager;
-                if (browserManager._backgroundPreloadTask) {
-                    this.logger.info(`[WebUI] Aborting background preload before file upload...`);
-                    browserManager._backgroundPreloadAbort = true;
-                    try {
-                        await browserManager._backgroundPreloadTask;
-                    } catch (error) {
-                        // Ignore errors from aborted task
-                        this.logger.debug(`[WebUI] Background preload aborted: ${error.message}`);
-                    }
-                    this.logger.info(`[WebUI] Background preload aborted, proceeding with file upload`);
-                }
+                await this.serverSystem.browserManager.abortBackgroundPreload();
 
                 // Ensure directory exists
                 const configDir = path.join(process.cwd(), "configs", "auth");
@@ -763,18 +719,7 @@ class StatusRoutes {
                 // Abort any ongoing background preload task before batch upload
                 // This prevents race conditions where background tasks continue initializing contexts
                 // while we're adding multiple new accounts
-                const browserManager = this.serverSystem.browserManager;
-                if (browserManager._backgroundPreloadTask) {
-                    this.logger.info(`[WebUI] Aborting background preload before batch upload...`);
-                    browserManager._backgroundPreloadAbort = true;
-                    try {
-                        await browserManager._backgroundPreloadTask;
-                    } catch (error) {
-                        // Ignore errors from aborted task
-                        this.logger.debug(`[WebUI] Background preload aborted: ${error.message}`);
-                    }
-                    this.logger.info(`[WebUI] Background preload aborted, proceeding with batch upload`);
-                }
+                await this.serverSystem.browserManager.abortBackgroundPreload();
 
                 // Ensure directory exists
                 const configDir = path.join(process.cwd(), "configs", "auth");

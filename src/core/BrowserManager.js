@@ -1305,6 +1305,29 @@ class BrowserManager {
     }
 
     /**
+     * Abort any ongoing background preload task and wait for it to complete
+     * This is a public method that encapsulates access to internal preload state
+     * @returns {Promise<void>} Resolves when the background task has been aborted and cleaned up
+     */
+    async abortBackgroundPreload() {
+        if (!this._backgroundPreloadTask) {
+            return; // No task to abort
+        }
+
+        this.logger.info(`[ContextPool] Aborting background preload task...`);
+        this._backgroundPreloadAbort = true;
+
+        try {
+            await this._backgroundPreloadTask;
+        } catch (error) {
+            // Ignore errors from aborted task
+            this.logger.debug(`[ContextPool] Background preload aborted: ${error.message}`);
+        }
+
+        this.logger.info(`[ContextPool] Background preload aborted successfully`);
+    }
+
+    /**
      * Background sequential initialization of contexts (fire-and-forget)
      * Only one instance should be active at a time - new calls abort old ones
      * @param {number[]} indices - Auth indices to initialize (candidates, may exceed pool size)
@@ -1312,17 +1335,7 @@ class BrowserManager {
      */
     async _preloadBackgroundContexts(indices, maxPoolSize = 0) {
         // If there's an existing background task, abort it and wait for it to finish
-        if (this._backgroundPreloadTask) {
-            this.logger.info(`[ContextPool] Aborting previous background preload task...`);
-            this._backgroundPreloadAbort = true;
-            try {
-                await this._backgroundPreloadTask;
-            } catch (error) {
-                // Ignore errors from aborted task
-                this.logger.debug(`[ContextPool] Previous background preload task aborted: ${error.message}`);
-            }
-            this.logger.info(`[ContextPool] Previous background preload task aborted successfully`);
-        }
+        await this.abortBackgroundPreload();
 
         // Reset abort flag and create new background task
         this._backgroundPreloadAbort = false;
@@ -1430,17 +1443,7 @@ class BrowserManager {
         // Abort any ongoing background preload task before cleanup
         // This prevents race conditions where background tasks continue initializing contexts
         // that will be immediately removed by the new rebalance after switch
-        if (this._backgroundPreloadTask) {
-            this.logger.info(`[ContextPool] Pre-cleanup: aborting background preload...`);
-            this._backgroundPreloadAbort = true;
-            try {
-                await this._backgroundPreloadTask;
-            } catch (error) {
-                // Ignore errors from aborted task
-                this.logger.debug(`[ContextPool] Background preload aborted: ${error.message}`);
-            }
-            this.logger.info(`[ContextPool] Pre-cleanup: background preload aborted, proceeding with cleanup`);
-        }
+        await this.abortBackgroundPreload();
 
         // Test: Check if initializingContexts is empty after aborting background task
         if (this.initializingContexts.size > 0) {
