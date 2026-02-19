@@ -1620,6 +1620,12 @@ const batchDeleteAccounts = async () => {
 
     // Helper to perform batch delete
     const performBatchDelete = async (forceDelete = false) => {
+        const notification = ElNotification({
+            duration: 0,
+            message: t("operationInProgress"),
+            title: t("warningTitle"),
+            type: "warning",
+        });
         state.isSwitchingAccount = true;
         try {
             const res = await fetch("/api/accounts/batch", {
@@ -1631,6 +1637,7 @@ const batchDeleteAccounts = async () => {
 
             if (res.status === 409 && data.requiresConfirmation) {
                 state.isSwitchingAccount = false;
+                notification.close();
                 ElMessageBox.confirm(t("warningDeleteCurrentAccount"), t("warningTitle"), {
                     cancelButtonText: t("cancel"),
                     confirmButtonText: t("ok"),
@@ -1667,6 +1674,7 @@ const batchDeleteAccounts = async () => {
             ElMessage.error(t("batchDeleteFailed", { error: err.message || err }));
         } finally {
             state.isSwitchingAccount = false;
+            notification.close();
             updateContent();
         }
     };
@@ -1843,6 +1851,12 @@ const deleteAccountByIndex = async targetIndex => {
 
     // Helper function to perform the actual deletion
     const performDelete = async (forceDelete = false) => {
+        const notification = ElNotification({
+            duration: 0,
+            message: t("operationInProgress"),
+            title: t("warningTitle"),
+            type: "warning",
+        });
         state.isSwitchingAccount = true;
         let shouldUpdate = true;
         try {
@@ -1855,6 +1869,7 @@ const deleteAccountByIndex = async targetIndex => {
             if (res.status === 409 && data.requiresConfirmation) {
                 shouldUpdate = false;
                 state.isSwitchingAccount = false;
+                notification.close();
                 ElMessageBox.confirm(t("warningDeleteCurrentAccount"), t("warningTitle"), {
                     cancelButtonText: t("cancel"),
                     confirmButtonText: t("ok"),
@@ -1881,6 +1896,7 @@ const deleteAccountByIndex = async targetIndex => {
         } finally {
             if (shouldUpdate) {
                 state.isSwitchingAccount = false;
+                notification.close();
                 updateContent();
             }
         }
@@ -2244,6 +2260,14 @@ const handleFileUpload = async event => {
     // Reset input so same files can be selected again
     event.target.value = "";
 
+    // Show notification immediately
+    const notification = ElNotification({
+        duration: 0,
+        message: t("operationInProgress"),
+        title: t("warningTitle"),
+        type: "warning",
+    });
+
     // Helper function to read file as ArrayBuffer (for zip)
     const readFileAsArrayBuffer = file =>
         new Promise((resolve, reject) => {
@@ -2363,6 +2387,7 @@ const handleFileUpload = async event => {
 
     // Check if we have anything to process
     if (jsonFilesToUpload.length === 0 && extractErrors.length === 0) {
+        notification.close();
         ElMessage.warning(t("noSupportedFiles"));
         return;
     }
@@ -2455,6 +2480,9 @@ const handleFileUpload = async event => {
             }
         }
     }
+
+    // Close the waiting notification
+    notification.close();
 
     // Build notification message with file details (scrollable container)
     let messageHtml = '<div style="max-height: 50vh; overflow-y: auto;">';
