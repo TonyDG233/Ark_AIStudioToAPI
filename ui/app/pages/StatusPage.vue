@@ -2395,7 +2395,6 @@ const handleFileUpload = async event => {
 
         // Check if we have anything to process
         if (jsonFilesToUpload.length === 0 && extractErrors.length === 0) {
-            notification.close();
             ElMessage.warning(t("noSupportedFiles"));
             return;
         }
@@ -2489,9 +2488,6 @@ const handleFileUpload = async event => {
             }
         }
 
-        // Close the waiting notification
-        notification.close();
-
         // Build notification message with file details (scrollable container)
         let messageHtml = '<div style="max-height: 50vh; overflow-y: auto;">';
 
@@ -2532,6 +2528,7 @@ const handleFileUpload = async event => {
             notifyTitle = `${t("fileUploadBatchResult")} (✓${successFiles.length} ✗${failedFiles.length})`;
         }
 
+        // Show result notification (keep open)
         ElNotification({
             dangerouslyUseHTMLString: true,
             duration: 0,
@@ -2543,7 +2540,8 @@ const handleFileUpload = async event => {
 
         updateContent();
     } finally {
-        // Always reset busy flag, even if an error occurs
+        // Always close notification and reset busy flag
+        notification.close();
         state.isSwitchingAccount = false;
     }
 };
