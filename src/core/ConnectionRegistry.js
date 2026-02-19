@@ -334,11 +334,11 @@ class ConnectionRegistry extends EventEmitter {
     closeAllMessageQueues() {
         if (this.messageQueues.size > 0) {
             this.logger.info(`[Registry] Force closing ${this.messageQueues.size} pending message queues...`);
-            this.messageQueues.forEach(queue => {
+            this.messageQueues.forEach((queue, requestId) => {
                 try {
                     queue.close();
                 } catch (e) {
-                    /* ignore */
+                    this.logger.warn(`[Registry] Failed to close message queue for request ${requestId}: ${e.message}`);
                 }
             });
             this.messageQueues.clear();

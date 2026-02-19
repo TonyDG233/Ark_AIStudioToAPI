@@ -103,7 +103,9 @@ class RequestHandler {
             try {
                 await this.browserManager.closeContext(this.currentAuthIndex);
             } catch (e) {
-                /* ignore */
+                this.logger.warn(
+                    `[System] Failed to close unresponsive context for account #${this.currentAuthIndex}: ${e.message}`
+                );
             }
         }
         return false;
