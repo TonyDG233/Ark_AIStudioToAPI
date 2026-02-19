@@ -1362,10 +1362,18 @@ class BrowserManager {
                 break;
             }
 
-            // Check if browser is still available
+            // Check if browser is available, launch if needed
             if (!this.browser) {
-                this.logger.info(`[ContextPool] Background preload stopped: browser is not available`);
-                break;
+                this.logger.info(`[ContextPool] Browser not available, launching browser for background preload...`);
+                try {
+                    await this._ensureBrowser();
+                    this.logger.info(`[ContextPool] Browser launched successfully for background preload`);
+                } catch (error) {
+                    this.logger.error(
+                        `[ContextPool] Failed to launch browser for background preload: ${error.message}`
+                    );
+                    break;
+                }
             }
 
             // Check pool size limit
@@ -2123,6 +2131,13 @@ class BrowserManager {
         }
 
         if (!this.contexts.has(authIndex)) {
+            // Context doesn't exist (was never initialized or was aborted)
+            // Still check if we need to close the browser
+            // Only close if there are no contexts AND no contexts being initialized
+            if (this.contexts.size === 0 && this.initializingContexts.size === 0 && this.browser) {
+                this.logger.info(`[Browser] All contexts closed, closing browser instance...`);
+                await this.closeBrowser();
+            }
             return;
         }
 
@@ -2163,7 +2178,8 @@ class BrowserManager {
 
         // If this was the last context, close the browser to free resources
         // This ensures a clean state when all accounts are deleted
-        if (this.contexts.size === 0 && this.browser) {
+        // Only close if there are no contexts AND no contexts being initialized
+        if (this.contexts.size === 0 && this.initializingContexts.size === 0 && this.browser) {
             this.logger.info(`[Browser] All contexts closed, closing browser instance...`);
             await this.closeBrowser();
         }
