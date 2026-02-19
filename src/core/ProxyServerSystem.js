@@ -535,7 +535,7 @@ class ProxyServerSystem extends EventEmitter {
                     this.logger.error(
                         `[System] Rejecting WebSocket connection with invalid authIndex: ${authIndexParam} (parsed as ${authIndex})`
                     );
-                    ws.close(1008, "Invalid authIndex: must be a non-negative integer");
+                    this._safeCloseWebSocket(ws, 1008, "Invalid authIndex: must be a non-negative integer");
                     return;
                 }
 
@@ -545,6 +545,34 @@ class ProxyServerSystem extends EventEmitter {
                 });
             });
         });
+    }
+
+    /**
+     * Safely close a WebSocket connection with readyState check
+     * @param {WebSocket} ws - The WebSocket to close
+     * @param {number} code - Close code (e.g., 1000, 1008)
+     * @param {string} reason - Close reason
+     */
+    _safeCloseWebSocket(ws, code, reason) {
+        if (!ws) {
+            return;
+        }
+
+        // WebSocket readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+        // Only attempt to close if not already closing or closed
+        if (ws.readyState === 0 || ws.readyState === 1) {
+            try {
+                ws.close(code, reason);
+            } catch (error) {
+                this.logger.warn(
+                    `[System] Failed to close WebSocket (code=${code}, reason="${reason}"): ${error.message}`
+                );
+            }
+        } else {
+            this.logger.debug(
+                `[System] WebSocket already closing/closed (readyState=${ws.readyState}), skipping close()`
+            );
+        }
     }
 }
 

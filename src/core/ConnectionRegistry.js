@@ -41,11 +41,7 @@ class ConnectionRegistry extends EventEmitter {
             this.logger.error(
                 `[Server] Rejecting connection with invalid authIndex: ${authIndex}. Connection will be closed.`
             );
-            try {
-                websocket.close(1008, "Invalid authIndex");
-            } catch (e) {
-                /* ignore */
-            }
+            this._safeCloseWebSocket(websocket, 1008, "Invalid authIndex");
             return;
         }
 
@@ -58,10 +54,10 @@ class ConnectionRegistry extends EventEmitter {
             try {
                 // Remove event listeners to prevent them from firing during close
                 existingConnection.removeAllListeners();
-                existingConnection.close(1000, "Replaced by new connection");
             } catch (e) {
-                this.logger.warn(`[Server] Error closing old connection: ${e.message}`);
+                this.logger.warn(`[Server] Error removing listeners from old connection: ${e.message}`);
             }
+            this._safeCloseWebSocket(existingConnection, 1000, "Replaced by new connection");
         }
 
         // Clear grace timer for this authIndex
@@ -346,6 +342,34 @@ class ConnectionRegistry extends EventEmitter {
                 }
             });
             this.messageQueues.clear();
+        }
+    }
+
+    /**
+     * Safely close a WebSocket connection with readyState check
+     * @param {WebSocket} ws - The WebSocket to close
+     * @param {number} code - Close code (e.g., 1000, 1008)
+     * @param {string} reason - Close reason
+     */
+    _safeCloseWebSocket(ws, code, reason) {
+        if (!ws) {
+            return;
+        }
+
+        // WebSocket readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+        // Only attempt to close if not already closing or closed
+        if (ws.readyState === 0 || ws.readyState === 1) {
+            try {
+                ws.close(code, reason);
+            } catch (error) {
+                this.logger.warn(
+                    `[Registry] Failed to close WebSocket (code=${code}, reason="${reason}"): ${error.message}`
+                );
+            }
+        } else {
+            this.logger.debug(
+                `[Registry] WebSocket already closing/closed (readyState=${ws.readyState}), skipping close()`
+            );
         }
     }
 }
