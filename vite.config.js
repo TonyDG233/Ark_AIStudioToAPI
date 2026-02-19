@@ -18,6 +18,14 @@ module.exports = defineConfig({
         assetsDir: "assets",
         emptyOutDir: true,
         outDir: "../dist",
+        rollupOptions: {
+            output: {
+                manualChunks: undefined,
+            },
+        },
+    },
+    optimizeDeps: {
+        include: ["vue", "@vue/shared", "element-plus"],
     },
     plugins: [vue()],
     publicDir: "../public",
