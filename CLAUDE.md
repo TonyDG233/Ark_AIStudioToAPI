@@ -207,6 +207,4 @@ Edit `configs/models.json` to customize available models and their settings.
 
 ### Git Workflow
 
-- Main branch: `release-workflow`
-- Current branch: `performance/muli-context` (multi-context optimization)
-- Recent work focuses on context pool management and connection handling
+- Main branch: `main`

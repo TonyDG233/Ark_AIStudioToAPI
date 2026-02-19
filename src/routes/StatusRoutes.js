@@ -691,7 +691,7 @@ class StatusRoutes {
             }
         });
 
-        app.post("/api/files", isAuthenticated, (req, res) => {
+        app.post("/api/files", isAuthenticated, async (req, res) => {
             const { content } = req.body;
             // Ignore req.body.filename - auto rename
 
@@ -700,6 +700,22 @@ class StatusRoutes {
             }
 
             try {
+                // Abort any ongoing background preload task before upload
+                // This prevents race conditions where background tasks continue initializing contexts
+                // while we're adding a new account
+                const browserManager = this.serverSystem.browserManager;
+                if (browserManager._backgroundPreloadTask) {
+                    this.logger.info(`[WebUI] Aborting background preload before file upload...`);
+                    browserManager._backgroundPreloadAbort = true;
+                    try {
+                        await browserManager._backgroundPreloadTask;
+                    } catch (error) {
+                        // Ignore errors from aborted task
+                        this.logger.debug(`[WebUI] Background preload aborted: ${error.message}`);
+                    }
+                    this.logger.info(`[WebUI] Background preload aborted, proceeding with file upload`);
+                }
+
                 // Ensure directory exists
                 const configDir = path.join(process.cwd(), "configs", "auth");
                 if (!fs.existsSync(configDir)) {
