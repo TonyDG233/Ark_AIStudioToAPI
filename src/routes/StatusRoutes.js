@@ -217,6 +217,23 @@ class StatusRoutes {
                 const removedIndices = [];
                 const failed = [];
 
+                // Abort any ongoing background preload task before deletion
+                // This prevents race conditions where background tasks continue initializing contexts
+                // that are about to be deleted
+                const browserManager = this.serverSystem.browserManager;
+                if (browserManager._backgroundPreloadTask) {
+                    this.logger.info(`[Auth] Aborting background preload before dedup cleanup...`);
+                    browserManager._backgroundPreloadAbort = true;
+                    try {
+                        await browserManager._backgroundPreloadTask;
+                    } catch (error) {
+                        // Ignore errors from aborted task
+                        this.logger.debug(`[Auth] Background preload aborted: ${error.message}`);
+                    }
+                    this.logger.info(`[Auth] Background preload aborted, proceeding with dedup cleanup`);
+                }
+
+                // Delete duplicate auth files
                 for (const group of duplicateGroups) {
                     const removed = Array.isArray(group.removedIndices) ? group.removedIndices : [];
                     if (removed.length === 0) continue;
@@ -249,6 +266,20 @@ class StatusRoutes {
                 // Reload auth sources to update internal state immediately after dedup deletions
                 if (removedIndices.length > 0) {
                     authSource.reloadAuthSources();
+                }
+
+                // Close contexts for removed duplicate accounts
+                if (removedIndices.length > 0) {
+                    for (const idx of removedIndices) {
+                        try {
+                            await browserManager.closeContext(idx);
+                            this.serverSystem.connectionRegistry.closeConnectionByAuth(idx);
+                        } catch (error) {
+                            this.logger.warn(
+                                `[Auth] Failed to close context for removed duplicate #${idx}: ${error.message}`
+                            );
+                        }
+                    }
                 }
 
                 // Rebalance context pool after dedup
@@ -316,6 +347,23 @@ class StatusRoutes {
                 });
             }
 
+            // Abort any ongoing background preload task before deletion
+            // This prevents race conditions where background tasks continue initializing contexts
+            // that are about to be deleted
+            const browserManager = this.serverSystem.browserManager;
+            if (browserManager._backgroundPreloadTask) {
+                this.logger.info(`[WebUI] Aborting background preload before batch delete...`);
+                browserManager._backgroundPreloadAbort = true;
+                try {
+                    await browserManager._backgroundPreloadTask;
+                } catch (error) {
+                    // Ignore errors from aborted task
+                    this.logger.debug(`[WebUI] Background preload aborted: ${error.message}`);
+                }
+                this.logger.info(`[WebUI] Background preload aborted, proceeding with batch delete`);
+            }
+
+            // Delete auth files
             for (const targetIndex of validIndices) {
                 try {
                     authSource.removeAuth(targetIndex);
@@ -506,7 +554,24 @@ class StatusRoutes {
                 });
             }
 
+            // Abort any ongoing background preload task before deletion
+            // This prevents race conditions where background tasks continue initializing contexts
+            // that are about to be deleted
+            const browserManager = this.serverSystem.browserManager;
+            if (browserManager._backgroundPreloadTask) {
+                this.logger.info(`[WebUI] Aborting background preload before deleting account #${targetIndex}...`);
+                browserManager._backgroundPreloadAbort = true;
+                try {
+                    await browserManager._backgroundPreloadTask;
+                } catch (error) {
+                    // Ignore errors from aborted task
+                    this.logger.debug(`[WebUI] Background preload aborted: ${error.message}`);
+                }
+                this.logger.info(`[WebUI] Background preload aborted, proceeding with account deletion`);
+            }
+
             try {
+                // Delete auth file
                 authSource.removeAuth(targetIndex);
 
                 // Reload auth sources to update internal state immediately

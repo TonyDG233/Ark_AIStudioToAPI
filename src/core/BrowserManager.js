@@ -1656,32 +1656,32 @@ class BrowserManager {
      * @returns {Promise<{context, page}>}
      */
     async _initializeContext(authIndex, isBackgroundTask = false) {
-        // Check if this context has been marked for abort before starting
-        if (this.abortedContexts.has(authIndex)) {
-            throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
-        }
-
-        // Check if background preload was aborted (only for background tasks)
-        if (isBackgroundTask && this._backgroundPreloadAbort) {
-            throw new Error(`Context initialization aborted for index ${authIndex} (background preload aborted)`);
-        }
-
-        const proxyConfig = parseProxyFromEnv();
-        const storageStateObject = this.authSource.getAuth(authIndex);
-        if (!storageStateObject) {
-            throw new Error(`Failed to get or parse auth source for index ${authIndex}.`);
-        }
-
-        const buildScriptContent = this._loadAndConfigureBuildScript(authIndex);
-
-        // Viewport Randomization
-        const randomWidth = 1920 + Math.floor(Math.random() * 50);
-        const randomHeight = 1080 + Math.floor(Math.random() * 50);
-
         let context = null;
         let page = null;
 
         try {
+            // Check if this context has been marked for abort before starting
+            if (this.abortedContexts.has(authIndex)) {
+                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+            }
+
+            // Check if background preload was aborted (only for background tasks)
+            if (isBackgroundTask && this._backgroundPreloadAbort) {
+                throw new Error(`Context initialization aborted for index ${authIndex} (background preload aborted)`);
+            }
+
+            const proxyConfig = parseProxyFromEnv();
+            const storageStateObject = this.authSource.getAuth(authIndex);
+            if (!storageStateObject) {
+                throw new Error(`Failed to get or parse auth source for index ${authIndex}.`);
+            }
+
+            const buildScriptContent = this._loadAndConfigureBuildScript(authIndex);
+
+            // Viewport Randomization
+            const randomWidth = 1920 + Math.floor(Math.random() * 50);
+            const randomHeight = 1080 + Math.floor(Math.random() * 50);
+
             // Check abort status before expensive operations
             if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
                 throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
