@@ -337,12 +337,24 @@ class StatusRoutes {
                 this.logger.warn(
                     `[WebUI] Current active account #${currentAuthIndex} was deleted. Closing context and connection...`
                 );
-                // 1. Terminate all pending requests immediately
-                this.serverSystem.connectionRegistry.closeAllMessageQueues();
-                // 2. Close context first so page is gone when _removeConnection checks
-                await this.serverSystem.browserManager.closeContext(currentAuthIndex);
-                // 3. Then close WebSocket connection
-                this.serverSystem.connectionRegistry.closeConnectionByAuth(currentAuthIndex);
+                // Set system busy flag to prevent new requests during cleanup
+                const previousBusy = this.serverSystem.isSystemBusy === true;
+                if (!previousBusy) {
+                    this.serverSystem.isSystemBusy = true;
+                }
+                try {
+                    // 1. Terminate all pending requests immediately
+                    this.serverSystem.connectionRegistry.closeAllMessageQueues();
+                    // 2. Close context first so page is gone when _removeConnection checks
+                    await this.serverSystem.browserManager.closeContext(currentAuthIndex);
+                    // 3. Then close WebSocket connection
+                    this.serverSystem.connectionRegistry.closeConnectionByAuth(currentAuthIndex);
+                } finally {
+                    // Reset system busy flag after cleanup completes
+                    if (!previousBusy) {
+                        this.serverSystem.isSystemBusy = false;
+                    }
+                }
             }
 
             // Close contexts and connections for all successfully deleted accounts (except current, already handled)
@@ -504,14 +516,29 @@ class StatusRoutes {
                 this.logger.info(`[WebUI] Account #${targetIndex} deleted. Closing context and connection...`);
 
                 if (targetIndex === currentAuthIndex) {
-                    // If deleting the current account, terminate pending requests first
-                    this.serverSystem.connectionRegistry.closeAllMessageQueues();
+                    // Set system busy flag to prevent new requests during cleanup
+                    const previousBusy = this.serverSystem.isSystemBusy === true;
+                    if (!previousBusy) {
+                        this.serverSystem.isSystemBusy = true;
+                    }
+                    try {
+                        // If deleting the current account, terminate pending requests first
+                        this.serverSystem.connectionRegistry.closeAllMessageQueues();
+                        // Close context first so page is gone when _removeConnection checks
+                        await this.serverSystem.browserManager.closeContext(targetIndex);
+                        // Then close WebSocket connection
+                        this.serverSystem.connectionRegistry.closeConnectionByAuth(targetIndex);
+                    } finally {
+                        // Reset system busy flag after cleanup completes
+                        if (!previousBusy) {
+                            this.serverSystem.isSystemBusy = false;
+                        }
+                    }
+                } else {
+                    // Non-current account: no need for system busy flag
+                    await this.serverSystem.browserManager.closeContext(targetIndex);
+                    this.serverSystem.connectionRegistry.closeConnectionByAuth(targetIndex);
                 }
-
-                // Close context first so page is gone when _removeConnection checks
-                await this.serverSystem.browserManager.closeContext(targetIndex);
-                // Then close WebSocket connection
-                this.serverSystem.connectionRegistry.closeConnectionByAuth(targetIndex);
 
                 // Rebalance context pool after delete
                 this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
@@ -590,7 +617,7 @@ class StatusRoutes {
             const { count } = req.body;
             const newCount = parseInt(count, 10);
 
-            if (!isNaN(newCount) && newCount > 0) {
+            if (Number.isFinite(newCount) && newCount > 0) {
                 this.logger.setDisplayLimit(newCount);
                 this.logger.info(`[WebUI] Log display limit updated to: ${newCount}`);
                 res.status(200).json({ message: "settingUpdateSuccess", setting: "logMaxCount", value: newCount });

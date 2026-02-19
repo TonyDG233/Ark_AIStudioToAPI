@@ -65,7 +65,7 @@ class ConfigLoader {
             const parsed = parseInt(process.env.WS_PORT, 10);
             config.wsPort = Number.isFinite(parsed) ? parsed : config.wsPort;
         }
-        if (process.env.MAX_CONTEXTS !== undefined) {
+        if (process.env.MAX_CONTEXTS) {
             const parsed = parseInt(process.env.MAX_CONTEXTS, 10);
             config.maxContexts = Number.isFinite(parsed) ? Math.max(0, parsed) : config.maxContexts;
         }
