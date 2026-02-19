@@ -1627,6 +1627,7 @@ const batchDeleteAccounts = async () => {
             type: "warning",
         });
         state.isSwitchingAccount = true;
+        let shouldUpdate = true;
         try {
             const res = await fetch("/api/accounts/batch", {
                 body: JSON.stringify({ force: forceDelete, indices }),
@@ -1636,6 +1637,7 @@ const batchDeleteAccounts = async () => {
             const data = await res.json();
 
             if (res.status === 409 && data.requiresConfirmation) {
+                shouldUpdate = false;
                 state.isSwitchingAccount = false;
                 notification.close();
                 ElMessageBox.confirm(t("warningDeleteCurrentAccount"), t("warningTitle"), {
@@ -1673,9 +1675,11 @@ const batchDeleteAccounts = async () => {
         } catch (err) {
             ElMessage.error(t("batchDeleteFailed", { error: err.message || err }));
         } finally {
-            state.isSwitchingAccount = false;
-            notification.close();
-            updateContent();
+            if (shouldUpdate) {
+                state.isSwitchingAccount = false;
+                notification.close();
+                updateContent();
+            }
         }
     };
 
@@ -2268,272 +2272,280 @@ const handleFileUpload = async event => {
         type: "warning",
     });
 
-    // Helper function to read file as ArrayBuffer (for zip)
-    const readFileAsArrayBuffer = file =>
-        new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = e => resolve(e.target.result);
-            reader.onerror = () => reject(new Error(t("fileReadFailed")));
-            reader.readAsArrayBuffer(file);
-        });
+    // Set busy flag to disable UI during upload and rebalance
+    state.isSwitchingAccount = true;
 
-    // Helper function to read file as text (for json)
-    const readFileAsText = file =>
-        new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = e => resolve({ content: e.target.result, name: file.name });
-            reader.onerror = () => reject(new Error(t("fileReadFailed")));
-            reader.readAsText(file);
-        });
-
-    // Helper function to upload a single file
-    const uploadFile = async fileData => {
-        let parsed;
-        try {
-            parsed = JSON.parse(fileData.content);
-        } catch (err) {
-            return { error: t("invalidJson"), filename: fileData.name, success: false };
-        }
-
-        try {
-            const res = await fetch("/api/files", {
-                body: JSON.stringify({ content: parsed }),
-                headers: { "Content-Type": "application/json" },
-                method: "POST",
+    try {
+        // Helper function to read file as ArrayBuffer (for zip)
+        const readFileAsArrayBuffer = file =>
+            new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.onerror = () => reject(new Error(t("fileReadFailed")));
+                reader.readAsArrayBuffer(file);
             });
 
-            if (res.ok) {
-                const data = await res.json();
-                return { filename: data.filename || fileData.name, success: true };
-            }
+        // Helper function to read file as text (for json)
+        const readFileAsText = file =>
+            new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve({ content: e.target.result, name: file.name });
+                reader.onerror = () => reject(new Error(t("fileReadFailed")));
+                reader.readAsText(file);
+            });
 
-            let errorMsg = t("unknownError");
+        // Helper function to upload a single file
+        const uploadFile = async fileData => {
+            let parsed;
             try {
-                const data = await res.json();
-                if (data.error) errorMsg = data.error;
-            } catch (e) {
-                // Response is not JSON or cannot be parsed, fallback to status text or unknown error
-                if (res.statusText) {
-                    errorMsg = `HTTP Error ${res.status}: ${res.statusText}`;
-                } else {
-                    errorMsg = `HTTP Error ${res.status}`;
-                }
-            }
-            return { error: errorMsg, filename: fileData.name, success: false };
-        } catch (err) {
-            // Network or other fetch errors
-            return { error: err.message || t("networkError"), filename: fileData.name, success: false };
-        }
-    };
-
-    // Collect all JSON files to upload (including extracted from zip)
-    const jsonFilesToUpload = [];
-    const extractErrors = [];
-
-    for (const file of files) {
-        const lowerName = file.name.toLowerCase();
-
-        if (lowerName.endsWith(".zip")) {
-            // Extract JSON files from zip
-            try {
-                let arrayBuffer;
-                try {
-                    arrayBuffer = await readFileAsArrayBuffer(file);
-                } catch (readErr) {
-                    extractErrors.push({ local: file.name, reason: readErr.message || t("fileReadFailed") });
-                    continue; // Skip zip processing if read failed
-                }
-
-                const zip = await JSZip.loadAsync(arrayBuffer);
-                const zipEntries = Object.keys(zip.files);
-
-                let foundJsonInZip = false;
-                for (const entryName of zipEntries) {
-                    const entry = zip.files[entryName];
-                    // Skip directories and non-json files
-                    if (entry.dir || !entryName.toLowerCase().endsWith(".json")) continue;
-
-                    foundJsonInZip = true;
-                    try {
-                        const content = await entry.async("string");
-                        // Use format: zipName/entryName for display
-                        const displayName = `${file.name}/${entryName}`;
-                        jsonFilesToUpload.push({ content, name: displayName });
-                    } catch (err) {
-                        extractErrors.push({
-                            local: `${file.name}/${entryName}`,
-                            reason: t("zipExtractFailed"), // Prefer localized generic error for extraction issues
-                        });
-                    }
-                }
-
-                if (!foundJsonInZip) {
-                    extractErrors.push({ local: file.name, reason: t("zipNoJsonFiles") });
-                }
+                parsed = JSON.parse(fileData.content);
             } catch (err) {
-                // Catch any other errors during zip processing (e.g. invalid zip format)
-                extractErrors.push({ local: file.name, reason: t("zipExtractFailed") });
+                return { error: t("invalidJson"), filename: fileData.name, success: false };
             }
-        } else if (lowerName.endsWith(".json")) {
-            // Regular JSON file
+
             try {
-                const fileData = await readFileAsText(file);
-                jsonFilesToUpload.push(fileData);
-            } catch (err) {
-                extractErrors.push({ local: file.name, reason: err.message || t("fileReadFailed") });
-            }
-        }
-    }
-
-    // Check if we have anything to process
-    if (jsonFilesToUpload.length === 0 && extractErrors.length === 0) {
-        notification.close();
-        ElMessage.warning(t("noSupportedFiles"));
-        return;
-    }
-
-    // Upload all collected JSON files
-    const successFiles = [];
-    const failedFiles = [...extractErrors];
-
-    // Use batch upload API if multiple files, otherwise use single file upload
-    if (jsonFilesToUpload.length > 1) {
-        // Batch upload
-        const parsedFiles = [];
-        const parseErrors = [];
-
-        // Parse all files first and track original indices
-        for (let i = 0; i < jsonFilesToUpload.length; i++) {
-            const fileData = jsonFilesToUpload[i];
-            try {
-                const parsed = JSON.parse(fileData.content);
-                parsedFiles.push({ content: parsed, name: fileData.name, originalIndex: i });
-            } catch (err) {
-                parseErrors.push({ local: fileData.name, reason: t("invalidJson") });
-            }
-        }
-
-        failedFiles.push(...parseErrors);
-
-        // Upload all valid files in one batch
-        if (parsedFiles.length > 0) {
-            try {
-                const res = await fetch("/api/files/batch", {
-                    body: JSON.stringify({ files: parsedFiles.map(f => f.content) }),
+                const res = await fetch("/api/files", {
+                    body: JSON.stringify({ content: parsed }),
                     headers: { "Content-Type": "application/json" },
                     method: "POST",
                 });
 
-                if (res.ok || res.status === 207) {
+                if (res.ok) {
                     const data = await res.json();
-                    // Process results array with proper index mapping
-                    if (data.results && Array.isArray(data.results)) {
-                        for (const result of data.results) {
-                            const originalFile = parsedFiles[result.index];
-                            if (result.success) {
-                                successFiles.push({
-                                    local: originalFile?.name || `file-${result.index}`,
-                                    saved: result.filename || originalFile?.name || `file-${result.index}`,
-                                });
-                            } else {
-                                failedFiles.push({
-                                    local: originalFile?.name || `file-${result.index}`,
-                                    reason: result.error || t("unknownError"),
-                                });
+                    return { filename: data.filename || fileData.name, success: true };
+                }
+
+                let errorMsg = t("unknownError");
+                try {
+                    const data = await res.json();
+                    if (data.error) errorMsg = data.error;
+                } catch (e) {
+                    // Response is not JSON or cannot be parsed, fallback to status text or unknown error
+                    if (res.statusText) {
+                        errorMsg = `HTTP Error ${res.status}: ${res.statusText}`;
+                    } else {
+                        errorMsg = `HTTP Error ${res.status}`;
+                    }
+                }
+                return { error: errorMsg, filename: fileData.name, success: false };
+            } catch (err) {
+                // Network or other fetch errors
+                return { error: err.message || t("networkError"), filename: fileData.name, success: false };
+            }
+        };
+
+        // Collect all JSON files to upload (including extracted from zip)
+        const jsonFilesToUpload = [];
+        const extractErrors = [];
+
+        for (const file of files) {
+            const lowerName = file.name.toLowerCase();
+
+            if (lowerName.endsWith(".zip")) {
+                // Extract JSON files from zip
+                try {
+                    let arrayBuffer;
+                    try {
+                        arrayBuffer = await readFileAsArrayBuffer(file);
+                    } catch (readErr) {
+                        extractErrors.push({ local: file.name, reason: readErr.message || t("fileReadFailed") });
+                        continue; // Skip zip processing if read failed
+                    }
+
+                    const zip = await JSZip.loadAsync(arrayBuffer);
+                    const zipEntries = Object.keys(zip.files);
+
+                    let foundJsonInZip = false;
+                    for (const entryName of zipEntries) {
+                        const entry = zip.files[entryName];
+                        // Skip directories and non-json files
+                        if (entry.dir || !entryName.toLowerCase().endsWith(".json")) continue;
+
+                        foundJsonInZip = true;
+                        try {
+                            const content = await entry.async("string");
+                            // Use format: zipName/entryName for display
+                            const displayName = `${file.name}/${entryName}`;
+                            jsonFilesToUpload.push({ content, name: displayName });
+                        } catch (err) {
+                            extractErrors.push({
+                                local: `${file.name}/${entryName}`,
+                                reason: t("zipExtractFailed"), // Prefer localized generic error for extraction issues
+                            });
+                        }
+                    }
+
+                    if (!foundJsonInZip) {
+                        extractErrors.push({ local: file.name, reason: t("zipNoJsonFiles") });
+                    }
+                } catch (err) {
+                    // Catch any other errors during zip processing (e.g. invalid zip format)
+                    extractErrors.push({ local: file.name, reason: t("zipExtractFailed") });
+                }
+            } else if (lowerName.endsWith(".json")) {
+                // Regular JSON file
+                try {
+                    const fileData = await readFileAsText(file);
+                    jsonFilesToUpload.push(fileData);
+                } catch (err) {
+                    extractErrors.push({ local: file.name, reason: err.message || t("fileReadFailed") });
+                }
+            }
+        }
+
+        // Check if we have anything to process
+        if (jsonFilesToUpload.length === 0 && extractErrors.length === 0) {
+            notification.close();
+            ElMessage.warning(t("noSupportedFiles"));
+            return;
+        }
+
+        // Upload all collected JSON files
+        const successFiles = [];
+        const failedFiles = [...extractErrors];
+
+        // Use batch upload API if multiple files, otherwise use single file upload
+        if (jsonFilesToUpload.length > 1) {
+            // Batch upload
+            const parsedFiles = [];
+            const parseErrors = [];
+
+            // Parse all files first and track original indices
+            for (let i = 0; i < jsonFilesToUpload.length; i++) {
+                const fileData = jsonFilesToUpload[i];
+                try {
+                    const parsed = JSON.parse(fileData.content);
+                    parsedFiles.push({ content: parsed, name: fileData.name, originalIndex: i });
+                } catch (err) {
+                    parseErrors.push({ local: fileData.name, reason: t("invalidJson") });
+                }
+            }
+
+            failedFiles.push(...parseErrors);
+
+            // Upload all valid files in one batch
+            if (parsedFiles.length > 0) {
+                try {
+                    const res = await fetch("/api/files/batch", {
+                        body: JSON.stringify({ files: parsedFiles.map(f => f.content) }),
+                        headers: { "Content-Type": "application/json" },
+                        method: "POST",
+                    });
+
+                    if (res.ok || res.status === 207) {
+                        const data = await res.json();
+                        // Process results array with proper index mapping
+                        if (data.results && Array.isArray(data.results)) {
+                            for (const result of data.results) {
+                                const originalFile = parsedFiles[result.index];
+                                if (result.success) {
+                                    successFiles.push({
+                                        local: originalFile?.name || `file-${result.index}`,
+                                        saved: result.filename || originalFile?.name || `file-${result.index}`,
+                                    });
+                                } else {
+                                    failedFiles.push({
+                                        local: originalFile?.name || `file-${result.index}`,
+                                        reason: result.error || t("unknownError"),
+                                    });
+                                }
                             }
                         }
-                    }
-                } else {
-                    // Batch upload failed completely
-                    let errorMsg = t("unknownError");
-                    try {
-                        const data = await res.json();
-                        if (data.error) errorMsg = data.error;
-                    } catch (e) {
-                        if (res.statusText) {
-                            errorMsg = `HTTP Error ${res.status}: ${res.statusText}`;
-                        } else {
-                            errorMsg = `HTTP Error ${res.status}`;
+                    } else {
+                        // Batch upload failed completely
+                        let errorMsg = t("unknownError");
+                        try {
+                            const data = await res.json();
+                            if (data.error) errorMsg = data.error;
+                        } catch (e) {
+                            if (res.statusText) {
+                                errorMsg = `HTTP Error ${res.status}: ${res.statusText}`;
+                            } else {
+                                errorMsg = `HTTP Error ${res.status}`;
+                            }
+                        }
+                        // Mark all parsed files as failed
+                        for (const fileData of parsedFiles) {
+                            failedFiles.push({ local: fileData.name, reason: errorMsg });
                         }
                     }
-                    // Mark all parsed files as failed
+                } catch (error) {
+                    // Network or other error - mark all parsed files as failed
+                    // (parseErrors are already in failedFiles)
                     for (const fileData of parsedFiles) {
-                        failedFiles.push({ local: fileData.name, reason: errorMsg });
+                        failedFiles.push({ local: fileData.name, reason: error.message || t("networkError") });
                     }
                 }
-            } catch (error) {
-                // Network or other error - mark all parsed files as failed
-                // (parseErrors are already in failedFiles)
-                for (const fileData of parsedFiles) {
-                    failedFiles.push({ local: fileData.name, reason: error.message || t("networkError") });
+            }
+        } else {
+            // Single file upload (use existing logic)
+            for (const fileData of jsonFilesToUpload) {
+                const result = await uploadFile(fileData);
+                if (result.success) {
+                    successFiles.push({ local: fileData.name, saved: result.filename });
+                } else {
+                    failedFiles.push({ local: fileData.name, reason: result.error });
                 }
             }
         }
-    } else {
-        // Single file upload (use existing logic)
-        for (const fileData of jsonFilesToUpload) {
-            const result = await uploadFile(fileData);
-            if (result.success) {
-                successFiles.push({ local: fileData.name, saved: result.filename });
-            } else {
-                failedFiles.push({ local: fileData.name, reason: result.error });
+
+        // Close the waiting notification
+        notification.close();
+
+        // Build notification message with file details (scrollable container)
+        let messageHtml = '<div style="max-height: 50vh; overflow-y: auto;">';
+
+        if (successFiles.length > 0) {
+            messageHtml += `<div style="margin-bottom: 8px;"><strong style="color: var(--el-color-success);">${t("fileUploadBatchSuccess")} (${successFiles.length}):</strong></div>`;
+            messageHtml += '<ul style="margin: 0 0 12px 16px; padding: 0;">';
+            for (const f of successFiles) {
+                messageHtml += `<li style="word-break: break-all;">${escapeHtml(f.local)} → ${escapeHtml(f.saved)}</li>`;
             }
+            messageHtml += "</ul>";
         }
-    }
 
-    // Close the waiting notification
-    notification.close();
-
-    // Build notification message with file details (scrollable container)
-    let messageHtml = '<div style="max-height: 50vh; overflow-y: auto;">';
-
-    if (successFiles.length > 0) {
-        messageHtml += `<div style="margin-bottom: 8px;"><strong style="color: var(--el-color-success);">${t("fileUploadBatchSuccess")} (${successFiles.length}):</strong></div>`;
-        messageHtml += '<ul style="margin: 0 0 12px 16px; padding: 0;">';
-        for (const f of successFiles) {
-            messageHtml += `<li style="word-break: break-all;">${escapeHtml(f.local)} → ${escapeHtml(f.saved)}</li>`;
+        if (failedFiles.length > 0) {
+            messageHtml += `<div style="margin-bottom: 8px;"><strong style="color: var(--el-color-danger);">${t("fileUploadBatchFailed")} (${failedFiles.length}):</strong></div>`;
+            messageHtml += '<ul style="margin: 0 0 0 16px; padding: 0;">';
+            for (const f of failedFiles) {
+                messageHtml += `<li style="word-break: break-all;">${escapeHtml(f.local)}: ${escapeHtml(f.reason)}</li>`;
+            }
+            messageHtml += "</ul>";
         }
-        messageHtml += "</ul>";
-    }
 
-    if (failedFiles.length > 0) {
-        messageHtml += `<div style="margin-bottom: 8px;"><strong style="color: var(--el-color-danger);">${t("fileUploadBatchFailed")} (${failedFiles.length}):</strong></div>`;
-        messageHtml += '<ul style="margin: 0 0 0 16px; padding: 0;">';
-        for (const f of failedFiles) {
-            messageHtml += `<li style="word-break: break-all;">${escapeHtml(f.local)}: ${escapeHtml(f.reason)}</li>`;
+        messageHtml += "</div>";
+
+        // Determine notification type
+        let notifyType = "success";
+        if (failedFiles.length > 0 && successFiles.length === 0) {
+            notifyType = "error";
+        } else if (failedFiles.length > 0) {
+            notifyType = "warning";
         }
-        messageHtml += "</ul>";
+
+        // Build title with counts
+        const totalProcessed = successFiles.length + failedFiles.length;
+        let notifyTitle;
+        if (totalProcessed === 1) {
+            notifyTitle = t("fileUploadComplete");
+        } else {
+            notifyTitle = `${t("fileUploadBatchResult")} (✓${successFiles.length} ✗${failedFiles.length})`;
+        }
+
+        ElNotification({
+            dangerouslyUseHTMLString: true,
+            duration: 0,
+            message: messageHtml,
+            position: "top-right",
+            title: notifyTitle,
+            type: notifyType,
+        });
+
+        updateContent();
+    } finally {
+        // Always reset busy flag, even if an error occurs
+        state.isSwitchingAccount = false;
     }
-
-    messageHtml += "</div>";
-
-    // Determine notification type
-    let notifyType = "success";
-    if (failedFiles.length > 0 && successFiles.length === 0) {
-        notifyType = "error";
-    } else if (failedFiles.length > 0) {
-        notifyType = "warning";
-    }
-
-    // Build title with counts
-    const totalProcessed = successFiles.length + failedFiles.length;
-    let notifyTitle;
-    if (totalProcessed === 1) {
-        notifyTitle = t("fileUploadComplete");
-    } else {
-        notifyTitle = `${t("fileUploadBatchResult")} (✓${successFiles.length} ✗${failedFiles.length})`;
-    }
-
-    ElNotification({
-        dangerouslyUseHTMLString: true,
-        duration: 0,
-        message: messageHtml,
-        position: "top-right",
-        title: notifyTitle,
-        type: notifyType,
-    });
-
-    updateContent();
 };
 
 // Download account by index
