@@ -723,73 +723,88 @@ class BrowserManager {
         }
 
         this.logger.info(`${logPrefix} (Step 1/${isNewVersion ? "6" : "5"}) Preparing to click "Code" button...`);
-        const maxTimes = 15;
-        for (let i = 1; i <= maxTimes; i++) {
-            try {
-                this.logger.info(`  [Attempt ${i}/${maxTimes}] Cleaning overlay layers and clicking...`);
-                /* eslint-disable no-undef */
-                await this.page.evaluate(() => {
-                    document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
-                });
-                /* eslint-enable no-undef */
-                await this.page.waitForTimeout(500);
 
-                // For new version that came from Remix flow (not saved URL), wait for Code button to be enabled
-                // For saved URL, we already waited above, so skip this
-                if (isNewVersion && !isOnSavedAppUrl) {
-                    this.logger.info(`  [New Version] Waiting for Code button to be enabled...`);
-                    const codeButton = this.page.locator('button:text("Code")').first();
+        // For new version, wait for Code button to be enabled and click once
+        if (isNewVersion && !isOnSavedAppUrl) {
+            this.logger.info(`  [New Version] Waiting for Code button to be enabled...`);
+            const codeButton = this.page.locator('button:text("Code")').first();
 
-                    // Wait for button to be visible and enabled (not disabled)
-                    await codeButton.waitFor({ state: "visible", timeout: 30000 });
+            // Wait for button to be visible and enabled (not disabled)
+            await codeButton.waitFor({ state: "visible", timeout: 30000 });
 
-                    // Check if button is enabled (wait up to 30 seconds)
-                    const maxWaitForEnabled = 30; // 30 attempts * 1 second = 30 seconds
-                    let isEnabled = false;
-                    for (let j = 0; j < maxWaitForEnabled; j++) {
-                        // Every 10 seconds, try to click Launch button if it exists
-                        if (j > 0 && j % 10 === 0) {
-                            try {
-                                const launchButton = this.page.locator('button:has-text("Launch")').first();
-                                if (await launchButton.isVisible({ timeout: 500 })) {
-                                    this.logger.info(`  [New Version] Clicking Launch button (${j}s elapsed)...`);
-                                    await launchButton.click({ timeout: 5000 });
-                                }
-                            } catch (e) {
-                                // Launch button not found or not clickable, continue
-                            }
+            // Check if button is enabled (wait up to 60 seconds)
+            const maxWaitForEnabled = 60;
+            let isEnabled = false;
+            for (let j = 0; j < maxWaitForEnabled; j++) {
+                // Every 10 seconds, try to click Launch button if it exists
+                if (j > 0 && j % 10 === 0) {
+                    try {
+                        const launchButton = this.page.locator('button:has-text("Launch")').first();
+                        if (await launchButton.isVisible({ timeout: 500 })) {
+                            this.logger.info(`  [New Version] Clicking Launch button (${j}s elapsed)...`);
+                            await launchButton.click({ timeout: 5000 });
                         }
-
-                        const disabled = await codeButton.getAttribute("disabled");
-                        const ariaDisabled = await codeButton.getAttribute("aria-disabled");
-
-                        if (disabled === null && ariaDisabled !== "true") {
-                            isEnabled = true;
-                            this.logger.info(`  [New Version] Code button is now enabled!`);
-                            break;
-                        }
-
-                        if (j % 5 === 0) {
-                            this.logger.info(
-                                `  [New Version] Code button still disabled, waiting... (${j + 1}/${maxWaitForEnabled})`
-                            );
-                        }
-                        await this.page.waitForTimeout(1000);
-                    }
-
-                    if (!isEnabled) {
-                        throw new Error("Code button did not become enabled after 30 seconds");
+                    } catch (e) {
+                        // Launch button not found or not clickable, continue
                     }
                 }
 
-                await this._smartClickCode(this.page);
+                const disabled = await codeButton.getAttribute("disabled");
+                const ariaDisabled = await codeButton.getAttribute("aria-disabled");
 
-                this.logger.info("  ✅ Click successful!");
-                break;
-            } catch (error) {
-                this.logger.warn(`  [Attempt ${i}/${maxTimes}] Click failed: ${error.message.split("\n")[0]}`);
-                if (i === maxTimes) {
-                    throw new Error(`Unable to click "Code" button after multiple attempts, initialization failed.`);
+                if (disabled === null && ariaDisabled !== "true") {
+                    isEnabled = true;
+                    this.logger.info(`  [New Version] Code button is now enabled!`);
+                    break;
+                }
+
+                if (j % 5 === 0 && j > 0) {
+                    this.logger.info(
+                        `  [New Version] Code button still disabled, waiting... (${j + 1}/${maxWaitForEnabled}s)`
+                    );
+                }
+                await this.page.waitForTimeout(1000);
+            }
+
+            if (!isEnabled) {
+                throw new Error("Code button did not become enabled after 60 seconds");
+            }
+
+            // New version: click once without retry
+            this.logger.info(`  [New Version] Cleaning overlay layers and clicking Code button...`);
+            /* eslint-disable no-undef */
+            await this.page.evaluate(() => {
+                document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
+            });
+            /* eslint-enable no-undef */
+            await this.page.waitForTimeout(500);
+
+            await this._smartClickCode(this.page);
+            this.logger.info("  ✅ Click successful!");
+        } else {
+            // Old version or saved URL: use retry loop
+            const maxTimes = 15;
+            for (let i = 1; i <= maxTimes; i++) {
+                try {
+                    this.logger.info(`  [Attempt ${i}/${maxTimes}] Cleaning overlay layers and clicking...`);
+                    /* eslint-disable no-undef */
+                    await this.page.evaluate(() => {
+                        document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
+                    });
+                    /* eslint-enable no-undef */
+                    await this.page.waitForTimeout(500);
+
+                    await this._smartClickCode(this.page);
+
+                    this.logger.info("  ✅ Click successful!");
+                    break;
+                } catch (error) {
+                    this.logger.warn(`  [Attempt ${i}/${maxTimes}] Click failed: ${error.message.split("\n")[0]}`);
+                    if (i === maxTimes) {
+                        throw new Error(
+                            `Unable to click "Code" button after multiple attempts, initialization failed.`
+                        );
+                    }
                 }
             }
         }
