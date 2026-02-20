@@ -50,7 +50,15 @@ class ConfigLoader {
             config.maxRetries = Math.max(1, parseInt(process.env.MAX_RETRIES, 10)) || config.maxRetries;
         if (process.env.RETRY_DELAY)
             config.retryDelay = Math.max(50, parseInt(process.env.RETRY_DELAY, 10)) || config.retryDelay;
-        if (process.env.WS_PORT) config.wsPort = parseInt(process.env.WS_PORT, 10) || config.wsPort;
+        if (process.env.WS_PORT) {
+            // WS_PORT environment variable is no longer supported
+            const logger = require("./LoggingService");
+            logger.error(
+                `[Config] ❌ WS_PORT environment variable is deprecated and no longer supported. ` +
+                    `The WebSocket port is now fixed at 9998. Please remove WS_PORT from your .env file.`
+            );
+            // Do not modify config.wsPort - keep it at default 9998
+        }
         if (process.env.CAMOUFOX_EXECUTABLE_PATH) config.browserExecutablePath = process.env.CAMOUFOX_EXECUTABLE_PATH;
         if (process.env.API_KEYS) {
             config.apiKeys = process.env.API_KEYS.split(",");

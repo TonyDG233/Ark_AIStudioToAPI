@@ -428,22 +428,12 @@ class BrowserManager {
         }
 
         if (process.env.WS_PORT) {
-            const lines = buildScriptContent.split("\n");
-            let portReplaced = false;
-            for (let i = 0; i < lines.length; i++) {
-                if (lines[i].includes('constructor(endpoint = "ws://127.0.0.1:9998")')) {
-                    this.logger.info(`[Config] Found port config line: ${lines[i]}`);
-                    lines[i] = `    constructor(endpoint = "ws://127.0.0.1:${process.env.WS_PORT}") {`;
-                    this.logger.info(`[Config] Replaced with: ${lines[i]}`);
-                    portReplaced = true;
-                    break;
-                }
-            }
-            if (portReplaced) {
-                buildScriptContent = lines.join("\n");
-            } else {
-                this.logger.warn("[Config] Failed to find port config line in build.js, using default.");
-            }
+            // WS_PORT environment variable is no longer supported
+            this.logger.error(
+                `[Config] ❌ WS_PORT environment variable is deprecated and no longer supported. ` +
+                    `The WebSocket port is now fixed at 9998. Please remove WS_PORT from your .env file.`
+            );
+            // Do not modify the default WS_PORT - keep it at 9998
         }
 
         // Inject LOG_LEVEL configuration into build.js
