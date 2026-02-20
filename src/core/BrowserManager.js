@@ -1373,9 +1373,11 @@ class BrowserManager {
             let retryCount = 0;
             let initSuccess = false;
 
-            // Reset flags before starting retry loop
-            this._wsInitSuccess = false;
-            this._wsInitFailed = false;
+            // Check if initialization already succeeded (console listener may have detected it)
+            if (this._wsInitSuccess) {
+                this.logger.info(`[Browser] ✅ WebSocket already initialized, skipping wait`);
+                initSuccess = true;
+            }
 
             while (retryCount < maxRetries && !initSuccess) {
                 if (retryCount > 0) {
@@ -1530,9 +1532,11 @@ class BrowserManager {
             let retryCount = 0;
             let initSuccess = false;
 
-            // Reset flags before starting retry loop
-            this._wsInitSuccess = false;
-            this._wsInitFailed = false;
+            // Check if initialization already succeeded (console listener may have detected it)
+            if (this._wsInitSuccess) {
+                this.logger.info(`[Reconnect] ✅ WebSocket already initialized, skipping wait`);
+                initSuccess = true;
+            }
 
             while (retryCount < maxRetries && !initSuccess) {
                 if (retryCount > 0) {
