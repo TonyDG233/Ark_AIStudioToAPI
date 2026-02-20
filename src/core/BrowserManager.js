@@ -576,7 +576,8 @@ class BrowserManager {
      */
     async _navigateAndWakeUpPage(logPrefix = "[Browser]") {
         this.logger.info(`${logPrefix} Navigating to target page...`);
-        const targetUrl = "https://ai.studio/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
+        const targetUrl =
+            "https://aistudio.google.com/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603?showPreview=true&showAssistant=true";
         await this.page.goto(targetUrl, {
             timeout: 180000,
             waitUntil: "domcontentloaded",
