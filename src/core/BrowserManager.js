@@ -27,7 +27,6 @@ class BrowserManager {
         // currentAuthIndex is the single source of truth for current account, accessed via getter/setter
         // -1 means no account is currently active (invalid/error state)
         this._currentAuthIndex = -1;
-        this.scriptFileName = "build.js";
 
         // Flag to distinguish intentional close from unexpected disconnect
         // Used by ConnectionRegistry callback to skip unnecessary reconnect attempts
@@ -509,8 +508,7 @@ class BrowserManager {
      */
     async _navigateAndWakeUpPage(logPrefix = "[Browser]") {
         this.logger.info(`${logPrefix} Navigating to target page...`);
-        const targetUrl =
-            "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showCode=true&showAssistant=true";
+        const targetUrl = "https://ai.studio/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
         await this.page.goto(targetUrl, {
             timeout: 180000,
             waitUntil: "domcontentloaded",
@@ -596,6 +594,11 @@ class BrowserManager {
         this.logger.info(`${logPrefix} 🔍 Starting intelligent popup detection (max 6s)...`);
 
         const popupConfigs = [
+            {
+                logFound: `${logPrefix} ✅ Found "Continue to the app" button, clicking...`,
+                name: "Continue to the app",
+                selector: 'button:text("Continue to the app")',
+            },
             {
                 logFound: `${logPrefix} ✅ Found Cookie consent banner, clicking "Agree"...`,
                 name: "Cookie consent",
@@ -1096,8 +1099,6 @@ class BrowserManager {
             throw new Error(`Failed to get or parse auth source for index ${authIndex}.`);
         }
 
-        const buildScriptContent = this._loadAndConfigureBuildScript();
-
         try {
             // Viewport Randomization
             const randomWidth = 1920 + Math.floor(Math.random() * 50);
@@ -1153,9 +1154,12 @@ class BrowserManager {
             await this._checkPageStatusAndErrors("[Browser]");
 
             // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
+            // After clicking "Continue to the app", WebSocket will auto-connect
             await this._handlePopups("[Browser]");
 
-            await this._injectScriptToEditor(buildScriptContent, "[Browser]");
+            this.logger.info("[Browser] ✅ Waiting for WebSocket auto-connection after clicking button...");
+            // Wait a bit for the WebSocket connection to establish
+            await this.page.waitForTimeout(3000);
 
             // Start background wakeup service - only started here during initial browser launch
             this._startBackgroundWakeup();
@@ -1179,7 +1183,7 @@ class BrowserManager {
     }
 
     /**
-     * Lightweight Reconnect: Refreshes the page and re-injects the script
+     * Lightweight Reconnect: Refreshes the page and clicks "Continue to the app" button
      * without restarting the entire browser instance.
      *
      * This method is called when WebSocket connection is lost but the browser
@@ -1218,9 +1222,6 @@ class BrowserManager {
         }
 
         try {
-            // Load and configure the build.js script using the shared helper
-            const buildScriptContent = this._loadAndConfigureBuildScript();
-
             // Navigate to target page and wake it up
             await this._navigateAndWakeUpPage("[Reconnect]");
 
@@ -1228,10 +1229,12 @@ class BrowserManager {
             await this._checkPageStatusAndErrors("[Reconnect]");
 
             // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
+            // After clicking "Continue to the app", WebSocket will auto-connect
             await this._handlePopups("[Reconnect]");
 
-            // Use shared script injection helper with [Reconnect] log prefix
-            await this._injectScriptToEditor(buildScriptContent, "[Reconnect]");
+            this.logger.info("[Reconnect] ✅ Waiting for WebSocket auto-connection after clicking button...");
+            // Wait a bit for the WebSocket connection to establish
+            await this.page.waitForTimeout(3000);
 
             // [Auth Update] Save the refreshed cookies to the auth file immediately
             await this._updateAuthFile(authIndex);
