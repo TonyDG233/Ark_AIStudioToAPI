@@ -987,7 +987,7 @@ class BrowserManager {
                 initPromise = new Promise((resolve, reject) => {
                     const timeout = setTimeout(() => {
                         reject(new Error("Timeout waiting for initialization"));
-                    }, 90000);
+                    }, 120000);
 
                     secondConsoleHandler = msg => {
                         const msgText = msg.text();
@@ -1147,7 +1147,10 @@ class BrowserManager {
                     );
                     systemInitialized = true;
                 } catch (error) {
-                    this.logger.warn(`${logPrefix} ⚠️ ${error.message}, but continuing...`);
+                    this.logger.error(`${logPrefix} ❌ ${error.message}`);
+                    delete this.page._alreadyInitialized;
+                    delete this.page._hadSaveButton;
+                    throw new Error(`WebSocket connection timeout after 120 seconds. Account initialization failed.`);
                 }
                 delete this.page._alreadyInitialized;
                 delete this.page._hadSaveButton;
@@ -1165,7 +1168,7 @@ class BrowserManager {
                     await new Promise((resolve, reject) => {
                         const timeout = setTimeout(() => {
                             reject(new Error("Timeout waiting for initialization via early listener"));
-                        }, 90000);
+                        }, 120000);
 
                         // Set up a temporary listener to catch initialization
                         const tempHandler = msg => {
@@ -1188,7 +1191,10 @@ class BrowserManager {
                     this.logger.info(`${logPrefix} Browser client initialization detected via early listener!`);
                     systemInitialized = true;
                 } catch (error) {
-                    this.logger.warn(`${logPrefix} ⚠️ ${error.message}, but continuing...`);
+                    this.logger.error(`${logPrefix} ❌ ${error.message}`);
+                    delete this.page._alreadyInitialized;
+                    delete this.page._hadSaveButton;
+                    throw new Error(`WebSocket connection timeout after 120 seconds. Account initialization failed.`);
                 }
                 delete this.page._alreadyInitialized;
                 delete this.page._hadSaveButton;
