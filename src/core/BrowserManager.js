@@ -132,9 +132,8 @@ class BrowserManager {
     async _waitForWebSocketInit(logPrefix = "[Browser]", timeout = 60000) {
         this.logger.info(`${logPrefix} ⏳ Waiting for WebSocket initialization (timeout: ${timeout / 1000}s)...`);
 
-        // Reset flags before waiting
-        this._wsInitSuccess = false;
-        this._wsInitFailed = false;
+        // Don't reset flags here - they should be reset before calling this method
+        // This allows the method to detect if initialization already completed
 
         const startTime = Date.now();
         const checkInterval = 1000; // Check every 1 second
@@ -1236,10 +1235,6 @@ class BrowserManager {
             // Check for cookie expiration, region restrictions, and other errors
             await this._checkPageStatusAndErrors("[Browser]");
 
-            // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
-            // After clicking "Continue to the app", WebSocket will auto-connect
-            await this._handlePopups("[Browser]");
-
             // Wait for WebSocket initialization with error checking and retry logic
             const maxRetries = 3;
             let retryCount = 0;
@@ -1251,8 +1246,16 @@ class BrowserManager {
                     // Refresh the page and re-handle popups
                     await this.page.reload({ waitUntil: "domcontentloaded" });
                     await this.page.waitForTimeout(2000);
-                    await this._handlePopups("[Browser]");
                 }
+
+                // Reset flags before each attempt (before handling popups)
+                this._wsInitSuccess = false;
+                this._wsInitFailed = false;
+
+                // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
+                // After clicking "Continue to the app", WebSocket will auto-connect
+                // Note: WebSocket might already be connected before clicking the button
+                await this._handlePopups("[Browser]");
 
                 // Wait for WebSocket initialization (60 second timeout)
                 initSuccess = await this._waitForWebSocketInit("[Browser]", 60000);
@@ -1339,10 +1342,6 @@ class BrowserManager {
             // Check for cookie expiration, region restrictions, and other errors
             await this._checkPageStatusAndErrors("[Reconnect]");
 
-            // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
-            // After clicking "Continue to the app", WebSocket will auto-connect
-            await this._handlePopups("[Reconnect]");
-
             // Wait for WebSocket initialization with error checking and retry logic
             const maxRetries = 3;
             let retryCount = 0;
@@ -1354,8 +1353,16 @@ class BrowserManager {
                     // Refresh the page and re-handle popups
                     await this.page.reload({ waitUntil: "domcontentloaded" });
                     await this.page.waitForTimeout(2000);
-                    await this._handlePopups("[Reconnect]");
                 }
+
+                // Reset flags before each attempt (before handling popups)
+                this._wsInitSuccess = false;
+                this._wsInitFailed = false;
+
+                // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
+                // After clicking "Continue to the app", WebSocket will auto-connect
+                // Note: WebSocket might already be connected before clicking the button
+                await this._handlePopups("[Reconnect]");
 
                 // Wait for WebSocket initialization (60 second timeout)
                 initSuccess = await this._waitForWebSocketInit("[Reconnect]", 60000);
