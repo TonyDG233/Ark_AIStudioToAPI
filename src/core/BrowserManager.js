@@ -1291,7 +1291,7 @@ class BrowserManager {
                 this.logger.warn(`[Browser] Wakeup minor error: ${e.message}`);
             }
 
-            // Register console listener only once to avoid duplicate registrations
+            // Register console listener BEFORE navigation to catch all WebSocket events
             if (!this._consoleListenerRegistered) {
                 this.page.on("console", msg => {
                     const msgText = msg.text();
@@ -1327,50 +1327,6 @@ class BrowserManager {
 
             // Try to click Launch button if it exists (not a popup, but a page button)
             await this._tryClickLaunchButton("[Browser]");
-
-            // Check if we were redirected to the wrong page after handling popups
-            const targetUrl = "https://ai.studio/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
-            const expectedAppId = "0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
-            let currentUrl = this.page.url();
-
-            if (!currentUrl.includes(expectedAppId)) {
-                this.logger.warn(`[Browser] ⚠️ Page redirected to: ${currentUrl}`);
-                this.logger.info(`[Browser] Expected app ID: ${expectedAppId}`);
-                this.logger.info(`[Browser] Attempting to navigate again...`);
-
-                // Reset WebSocket initialization flags before re-navigation
-                this._wsInitSuccess = false;
-                this._wsInitFailed = false;
-
-                // Wait a bit before retrying
-                await this.page.waitForTimeout(2000);
-
-                // Try navigating again
-                await this.page.goto(targetUrl, {
-                    timeout: 180000,
-                    waitUntil: "domcontentloaded",
-                });
-                await this.page.waitForTimeout(2000);
-
-                // Handle popups again after retry
-                await this._handlePopups("[Browser]");
-
-                // Try to click Launch button again after retry
-                await this._tryClickLaunchButton("[Browser]");
-
-                // Check URL again
-                currentUrl = this.page.url();
-                if (!currentUrl.includes(expectedAppId)) {
-                    this.logger.error(`[Browser] ❌ Still on wrong page after retry: ${currentUrl}`);
-                    throw new Error(
-                        `Failed to navigate to correct page. Current URL: ${currentUrl}, Expected app ID: ${expectedAppId}`
-                    );
-                } else {
-                    this.logger.info(`[Browser] ✅ Successfully navigated to correct page on retry: ${currentUrl}`);
-                }
-            } else {
-                this.logger.info(`[Browser] ✅ Confirmed on correct page: ${currentUrl}`);
-            }
 
             // Wait for WebSocket initialization with error checking and retry logic
             const maxRetries = 3;
@@ -1492,48 +1448,6 @@ class BrowserManager {
 
             // Try to click Launch button if it exists (not a popup, but a page button)
             await this._tryClickLaunchButton("[Reconnect]");
-
-            // Check if we were redirected to the wrong page after handling popups
-            const targetUrl = "https://ai.studio/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
-            const expectedAppId = "0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
-            let currentUrl = this.page.url();
-
-            if (!currentUrl.includes(expectedAppId)) {
-                this.logger.warn(`[Reconnect] ⚠️ Page redirected to: ${currentUrl}`);
-                this.logger.info(`[Reconnect] Expected app ID: ${expectedAppId}`);
-                this.logger.info(`[Reconnect] Attempting to navigate again...`);
-
-                // Reset WebSocket initialization flags before re-navigation
-                this._wsInitSuccess = false;
-                this._wsInitFailed = false;
-
-                // Wait a bit before retrying
-                await this.page.waitForTimeout(2000);
-
-                // Try navigating again
-                await this.page.goto(targetUrl, {
-                    timeout: 180000,
-                    waitUntil: "domcontentloaded",
-                });
-                await this.page.waitForTimeout(2000);
-
-                // Handle popups again after retry
-                await this._handlePopups("[Reconnect]");
-
-                // Try to click Launch button again after retry
-                await this._tryClickLaunchButton("[Reconnect]");
-
-                // Check URL again
-                currentUrl = this.page.url();
-                if (!currentUrl.includes(expectedAppId)) {
-                    this.logger.error(`[Reconnect] ❌ Still on wrong page after retry: ${currentUrl}`);
-                    return false;
-                } else {
-                    this.logger.info(`[Reconnect] ✅ Successfully navigated to correct page on retry: ${currentUrl}`);
-                }
-            } else {
-                this.logger.info(`[Reconnect] ✅ Confirmed on correct page: ${currentUrl}`);
-            }
 
             // Wait for WebSocket initialization with error checking and retry logic
             const maxRetries = 3;
