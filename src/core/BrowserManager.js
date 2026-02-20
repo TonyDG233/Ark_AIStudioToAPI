@@ -132,22 +132,9 @@ class BrowserManager {
     async _waitForWebSocketInit(logPrefix = "[Browser]", timeout = 60000) {
         this.logger.info(`${logPrefix} ⏳ Waiting for WebSocket initialization (timeout: ${timeout / 1000}s)...`);
 
-        let initSuccess = false;
-        let initFailed = false;
-
-        // Set up console message listener
-        const consoleListener = msg => {
-            const msgText = msg.text();
-            if (msgText.includes("System initialization complete, waiting for server instructions")) {
-                this.logger.info(`${logPrefix} ✅ Detected successful initialization message from browser`);
-                initSuccess = true;
-            } else if (msgText.includes("System initialization failed")) {
-                this.logger.warn(`${logPrefix} ❌ Detected initialization failure message from browser`);
-                initFailed = true;
-            }
-        };
-
-        this.page.on("console", consoleListener);
+        // Reset flags before waiting
+        this._wsInitSuccess = false;
+        this._wsInitFailed = false;
 
         const startTime = Date.now();
         const checkInterval = 1000; // Check every 1 second
@@ -155,14 +142,12 @@ class BrowserManager {
         try {
             while (Date.now() - startTime < timeout) {
                 // Check if initialization succeeded
-                if (initSuccess) {
-                    this.page.off("console", consoleListener);
+                if (this._wsInitSuccess) {
                     return true;
                 }
 
                 // Check if initialization failed
-                if (initFailed) {
-                    this.page.off("console", consoleListener);
+                if (this._wsInitFailed) {
                     this.logger.warn(`${logPrefix} Initialization failed, will attempt refresh...`);
                     return false;
                 }
@@ -173,7 +158,6 @@ class BrowserManager {
                     this.logger.warn(
                         `${logPrefix} Detected page error: ${JSON.stringify(errors)}, will attempt refresh...`
                     );
-                    this.page.off("console", consoleListener);
                     return false;
                 }
 
@@ -182,11 +166,9 @@ class BrowserManager {
             }
 
             // Timeout reached
-            this.page.off("console", consoleListener);
             this.logger.error(`${logPrefix} ⏱️ WebSocket initialization timeout after ${timeout / 1000}s`);
             return false;
         } catch (error) {
-            this.page.off("console", consoleListener);
             this.logger.error(`${logPrefix} Error during WebSocket initialization wait: ${error.message}`);
             return false;
         }
@@ -1237,6 +1219,15 @@ class BrowserManager {
                     this.logger.info(`[Browser] ${msgText.replace("[ProxyClient] ", "")}`);
                 } else if (msg.type() === "error") {
                     this.logger.error(`[Browser Page Error] ${msgText}`);
+                }
+
+                // Check for WebSocket initialization status
+                if (msgText.includes("System initialization complete, waiting for server instructions")) {
+                    this.logger.info(`[Browser] ✅ Detected successful initialization message from browser`);
+                    this._wsInitSuccess = true;
+                } else if (msgText.includes("System initialization failed")) {
+                    this.logger.warn(`[Browser] ❌ Detected initialization failure message from browser`);
+                    this._wsInitFailed = true;
                 }
             });
 
