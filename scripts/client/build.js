@@ -98,7 +98,7 @@ const Logger = {
 
 class ConnectionManager extends EventTarget {
     // [BrowserManager Injection Point] Do not modify the line below.
-    // This line is dynamically replaced by BrowserManager.js based on WS_PORT environment variable.
+    // WebSocket endpoint is now fixed at ws://127.0.0.1:9998 and cannot be customized.
     constructor(endpoint = "ws://127.0.0.1:9998") {
         super();
         this.endpoint = endpoint;

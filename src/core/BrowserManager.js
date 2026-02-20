@@ -399,7 +399,7 @@ class BrowserManager {
 
     /**
      * Helper: Load and configure build.js script content
-     * Applies environment-specific configurations (TARGET_DOMAIN, WS_PORT, LOG_LEVEL)
+     * Applies environment-specific configurations (TARGET_DOMAIN, LOG_LEVEL)
      * @returns {string} Configured build.js script content
      */
     _loadAndConfigureBuildScript() {
