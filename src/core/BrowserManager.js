@@ -1338,6 +1338,10 @@ class BrowserManager {
                 this.logger.info(`[Browser] Expected app ID: ${expectedAppId}`);
                 this.logger.info(`[Browser] Attempting to navigate again...`);
 
+                // Reset WebSocket initialization flags before re-navigation
+                this._wsInitSuccess = false;
+                this._wsInitFailed = false;
+
                 // Wait a bit before retrying
                 await this.page.waitForTimeout(2000);
 
@@ -1498,6 +1502,10 @@ class BrowserManager {
                 this.logger.warn(`[Reconnect] ⚠️ Page redirected to: ${currentUrl}`);
                 this.logger.info(`[Reconnect] Expected app ID: ${expectedAppId}`);
                 this.logger.info(`[Reconnect] Attempting to navigate again...`);
+
+                // Reset WebSocket initialization flags before re-navigation
+                this._wsInitSuccess = false;
+                this._wsInitFailed = false;
 
                 // Wait a bit before retrying
                 await this.page.waitForTimeout(2000);
