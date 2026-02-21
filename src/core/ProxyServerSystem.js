@@ -85,8 +85,9 @@ class ProxyServerSystem extends EventEmitter {
         this.wsServer = null;
         this.webRoutes = new WebRoutes(this);
         this.autoSwitchTimer = null;
+        this.nextSwitchTimestamp = null;
     }
- 
+
     async start(initialAuthIndex = null) {
         this.logger.info("[System] Starting flexible startup process...");
         await this._startHttpServer();
@@ -99,6 +100,7 @@ class ProxyServerSystem extends EventEmitter {
         if (allAvailableIndices.length === 0) {
             this.logger.warn("[System] No available authentication source. Starting in account binding mode.");
             this.emit("started");
+            this.updateAutoSwitchTimer();
             return; // Exit early
         }
 
@@ -155,22 +157,39 @@ class ProxyServerSystem extends EventEmitter {
         this.emit("started");
 
         // Start the auto-switch timer if enabled
-        this._startAutoSwitchTimer();
+        this.updateAutoSwitchTimer();
     }
 
     // ========================================================================
     // MODIFICATION: Start of auto-account-switching logic
     // ========================================================================
-    _startAutoSwitchTimer() {
+    updateAutoSwitchTimer() {
+        // Always clear existing timer before starting a new one
+        if (this.autoSwitchTimer) {
+            clearInterval(this.autoSwitchTimer);
+            this.autoSwitchTimer = null;
+        }
+        this.nextSwitchTimestamp = null;
+
+        const rotationIndices = this.authSource.getRotationIndices();
+
+        // Conditions to start the timer
         if (!this.config.enableAutoSwitch) {
-            this.logger.info("[System] ⏰ Auto-account-switching is disabled.");
+            this.logger.info("[System] ⏰ Auto-account-switching is disabled by config.");
+            return;
+        }
+
+        if (rotationIndices.length <= 1) {
+            this.logger.info("[System] ⏰ Auto-account-switching is disabled, not enough accounts to rotate.");
             return;
         }
 
         const interval = this.config.autoSwitchIntervalHours * 60 * 60 * 1000;
-        this.logger.info(`[System] ⏰ Started auto-account-switching timer, interval: ${this.config.autoSwitchIntervalHours} hours.`);
+        this.nextSwitchTimestamp = Date.now() + interval;
 
-        if (this.autoSwitchTimer) clearInterval(this.autoSwitchTimer);
+        this.logger.info(
+            `[System] ⏰ Started auto-account-switching timer, interval: ${this.config.autoSwitchIntervalHours} hours.`
+        );
 
         this.autoSwitchTimer = setInterval(async () => {
             this.logger.info(`[System] ⏰ Triggering scheduled account switch...`);
@@ -179,18 +198,24 @@ class ProxyServerSystem extends EventEmitter {
                 const result = await this.requestHandler._switchToNextAuth();
                 if (result.success) {
                     this.logger.info(`[System] ✅ Scheduled switch successful, current account: #${result.newIndex}`);
+                    // On successful switch, just update the next timestamp
+                    this.nextSwitchTimestamp = Date.now() + interval;
                 } else {
                     this.logger.warn(`[System] ⚠️ Scheduled switch not executed: ${result.reason}`);
+                    // If switch fails, restart the timer which will re-evaluate conditions
+                    this.updateAutoSwitchTimer();
                 }
             } catch (error) {
                 this.logger.error(`[System] ❌ Scheduled switch failed: ${error.message}`);
+                // Also restart on critical error
+                this.updateAutoSwitchTimer();
             }
         }, interval);
     }
     // ========================================================================
     // MODIFICATION: End of auto-account-switching logic
     // ========================================================================
- 
+
     _createAuthMiddleware() {
         return (req, res, next) => {
             // Allow access if session is authenticated (e.g. browser accessing /vnc or API from UI)

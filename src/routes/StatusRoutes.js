@@ -240,6 +240,8 @@ class StatusRoutes {
             } catch (error) {
                 this.logger.error(`[Auth] Dedup cleanup failed: ${error.message}`);
                 return res.status(500).json({ error: error.message, message: "accountDedupFailed" });
+            } finally {
+                this.serverSystem.updateAutoSwitchTimer();
             }
         });
 
@@ -314,6 +316,7 @@ class StatusRoutes {
             }
 
             if (failedIndices.length > 0) {
+                this.serverSystem.updateAutoSwitchTimer();
                 return res.status(207).json({
                     failedIndices,
                     message: "batchDeletePartial",
@@ -322,6 +325,7 @@ class StatusRoutes {
                 });
             }
 
+            this.serverSystem.updateAutoSwitchTimer();
             return res.status(200).json({
                 message: "batchDeleteSuccess",
                 successCount: successIndices.length,
@@ -462,6 +466,7 @@ class StatusRoutes {
                 this.logger.warn(
                     `[WebUI] Account #${targetIndex} deleted via web interface. Previous current account: #${currentAuthIndex}`
                 );
+                this.serverSystem.updateAutoSwitchTimer();
                 res.status(200).json({
                     index: targetIndex,
                     message: "accountDeleteSuccess",
@@ -570,6 +575,7 @@ class StatusRoutes {
 
                 // Reload auth sources to pick up changes
                 this.serverSystem.authSource.reloadAuthSources();
+                this.serverSystem.updateAutoSwitchTimer();
 
                 this.logger.info(`[WebUI] File uploaded via API: generated ${newFilename}`);
                 res.status(200).json({ filename: newFilename, message: "File uploaded successfully" });
@@ -633,11 +639,13 @@ class StatusRoutes {
             status: {
                 accountDetails,
                 apiKeySource: config.apiKeySource,
+                autoSwitchIntervalHours: this.config.autoSwitchIntervalHours,
                 browserConnected: !!browserManager.browser,
                 currentAccountName,
                 currentAuthIndex,
                 debugMode: LoggingService.isDebugEnabled(),
                 duplicateIndicesRaw: duplicateIndices,
+                enableAutoSwitch: this.config.enableAutoSwitch,
                 failureCount,
                 forceThinking: this.serverSystem.forceThinking,
                 forceUrlContext: this.serverSystem.forceUrlContext,
@@ -650,31 +658,12 @@ class StatusRoutes {
                 invalidIndicesRaw: invalidIndices,
                 isSystemBusy: requestHandler.isSystemBusy,
                 logMaxCount: limit,
+                nextSwitchTimestamp: this.serverSystem.nextSwitchTimestamp || -1,
                 rotationIndicesRaw: rotationIndices,
                 streamingMode: this.serverSystem.streamingMode,
                 usageCount,
-                enableAutoSwitch: this.config.enableAutoSwitch,
-                autoSwitchIntervalHours: this.config.autoSwitchIntervalHours,
-                nextSwitchTimestamp: this._getNextSwitchTimestamp(),
             },
         };
-    }
-
-    _getNextSwitchTimestamp() {
-        if (!this.serverSystem.autoSwitchTimer) {
-            return -1;
-        }
-        const now = Date.now();
-        const interval = this.config.autoSwitchIntervalHours * 60 * 60 * 1000;
-
-        // Access the internal _lastExecution property if it exists
-        if (this.serverSystem.autoSwitchTimer._lastExecution) {
-            return this.serverSystem.autoSwitchTimer._lastExecution + interval;
-        }
-        
-        // Fallback if _lastExecution is not available (e.g. different Node.js versions)
-        // This provides an approximation.
-        return now + interval;
     }
 }
 
