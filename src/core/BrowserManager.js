@@ -42,7 +42,6 @@ class BrowserManager {
 
         // Target URL for AI Studio app
         this.targetUrl = "https://ai.studio/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
-        this.expectedAppId = "0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
 
         // Firefox/Camoufox does not use Chromium-style command line args.
         // We keep this empty; Camoufox has its own anti-fingerprinting optimizations built-in.
@@ -115,7 +114,7 @@ class BrowserManager {
      */
     async _checkPageErrors() {
         try {
-            const hasError = await this.page.evaluate(() => {
+            return await this.page.evaluate(() => {
                 // eslint-disable-next-line no-undef
                 const bodyText = document.body.innerText || "";
                 return {
@@ -126,7 +125,6 @@ class BrowserManager {
                         bodyText.includes("Failed to create snapshot") || bodyText.includes("Please try again"),
                 };
             });
-            return hasError;
         } catch (e) {
             return { appletFailed: false, concurrentUpdates: false, snapshotFailed: false };
         }
@@ -378,197 +376,124 @@ class BrowserManager {
      * Feature: Smart "Code" Button Clicking
      * Tries multiple selectors (Code, Develop, Edit, Icons) to be robust against UI changes.
      */
-    async _smartClickCode(page) {
-        const selectors = [
-            // Priority 1: Exact text match (Fastest)
-            'button:text("Code")',
-            // Priority 2: Alternative texts used by Google
-            'button:text("Develop")',
-            'button:text("Edit")',
-            // Priority 3: Fuzzy attribute matching
-            'button[aria-label*="Code"]',
-            'button[aria-label*="code"]',
-            // Priority 4: Icon based
-            'button mat-icon:text("code")',
-            'button span:has-text("Code")',
-        ];
-
-        this.logger.info('[Browser] Trying to locate "Code" entry point using smart selectors...');
-
-        for (const selector of selectors) {
-            try {
-                // Use a short timeout for quick fail-over
-                const element = page.locator(selector).first();
-                if (await element.isVisible({ timeout: 2000 })) {
-                    this.logger.info(`[Browser] ✅ Smart match: "${selector}", clicking...`);
-                    // Direct click with force as per new logic
-                    await element.click({ force: true, timeout: 10000 });
-                    return true;
-                }
-            } catch (e) {
-                // Ignore timeout for single selector, try next
-            }
-        }
-
-        throw new Error('Unable to find "Code" button or alternatives (Smart Click Failed)');
-    }
+    // async _smartClickCode(page) {
+    //     const selectors = [
+    //         // Priority 1: Exact text match (Fastest)
+    //         'button:text("Code")',
+    //         // Priority 2: Alternative texts used by Google
+    //         'button:text("Develop")',
+    //         'button:text("Edit")',
+    //         // Priority 3: Fuzzy attribute matching
+    //         'button[aria-label*="Code"]',
+    //         'button[aria-label*="code"]',
+    //         // Priority 4: Icon based
+    //         'button mat-icon:text("code")',
+    //         'button span:has-text("Code")',
+    //     ];
+    //
+    //     this.logger.info('[Browser] Trying to locate "Code" entry point using smart selectors...');
+    //
+    //     for (const selector of selectors) {
+    //         try {
+    //             // Use a short timeout for quick fail-over
+    //             const element = page.locator(selector).first();
+    //             if (await element.isVisible({ timeout: 2000 })) {
+    //                 this.logger.info(`[Browser] ✅ Smart match: "${selector}", clicking...`);
+    //                 // Direct click with force as per new logic
+    //                 await element.click({ force: true, timeout: 10000 });
+    //                 return true;
+    //             }
+    //         } catch (e) {
+    //             // Ignore timeout for single selector, try next
+    //         }
+    //     }
+    //
+    //     throw new Error('Unable to find "Code" button or alternatives (Smart Click Failed)');
+    // }
 
     /**
      * Helper: Load and configure build.js script content
      * Applies environment-specific configurations (TARGET_DOMAIN, LOG_LEVEL)
      * @returns {string} Configured build.js script content
      */
-    _loadAndConfigureBuildScript() {
-        let buildScriptContent = fs.readFileSync(
-            path.join(__dirname, "..", "..", "scripts", "client", "build.js"),
-            "utf-8"
-        );
-
-        if (process.env.TARGET_DOMAIN) {
-            const lines = buildScriptContent.split("\n");
-            let domainReplaced = false;
-            for (let i = 0; i < lines.length; i++) {
-                if (lines[i].includes("this.targetDomain =")) {
-                    this.logger.info(`[Config] Found targetDomain line: ${lines[i]}`);
-                    lines[i] = `        this.targetDomain = "${process.env.TARGET_DOMAIN}";`;
-                    this.logger.info(`[Config] Replaced with: ${lines[i]}`);
-                    domainReplaced = true;
-                    break;
-                }
-            }
-            if (domainReplaced) {
-                buildScriptContent = lines.join("\n");
-            } else {
-                this.logger.warn("[Config] Failed to find targetDomain line in build.js, ignoring.");
-            }
-        }
-
-        if (process.env.WS_PORT) {
-            // WS_PORT environment variable is no longer supported
-            this.logger.error(
-                `[Config] ❌ WS_PORT environment variable is deprecated and no longer supported. ` +
-                    `The WebSocket port is now fixed at 9998. Please remove WS_PORT from your .env file.`
-            );
-            // Do not modify the default WS_PORT - keep it at 9998
-        }
-
-        // Inject LOG_LEVEL configuration into build.js
-        // Read from LoggingService.currentLevel instead of environment variable
-        // This ensures runtime log level changes are respected when browser restarts
-        const LoggingService = require("../utils/LoggingService");
-        const currentLogLevel = LoggingService.currentLevel; // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
-        const currentLogLevelName = LoggingService.getLevel(); // "DEBUG", "INFO", etc.
-
-        if (currentLogLevel !== 1) {
-            const lines = buildScriptContent.split("\n");
-            let levelReplaced = false;
-            for (let i = 0; i < lines.length; i++) {
-                // Match "currentLevel: <number>," pattern, ignoring comments
-                // This is more robust than looking for specific comments like "// Default: INFO"
-                if (/^\s*currentLevel:\s*\d+/.test(lines[i])) {
-                    this.logger.info(`[Config] Found LOG_LEVEL config line: ${lines[i]}`);
-                    lines[i] = `    currentLevel: ${currentLogLevel}, // Injected: ${currentLogLevelName}`;
-                    this.logger.info(`[Config] Replaced with: ${lines[i]}`);
-                    levelReplaced = true;
-                    break;
-                }
-            }
-            if (levelReplaced) {
-                buildScriptContent = lines.join("\n");
-            } else {
-                this.logger.warn("[Config] Failed to find LOG_LEVEL config line in build.js, using default INFO.");
-            }
-        }
-
-        return buildScriptContent;
-    }
+    // _loadAndConfigureBuildScript() {
+    //     let buildScriptContent = fs.readFileSync(
+    //         path.join(__dirname, "..", "..", "scripts", "client", "build.js"),
+    //         "utf-8"
+    //     );
+    //
+    //     if (process.env.TARGET_DOMAIN) {
+    //         const lines = buildScriptContent.split("\n");
+    //         let domainReplaced = false;
+    //         for (let i = 0; i < lines.length; i++) {
+    //             if (lines[i].includes("this.targetDomain =")) {
+    //                 this.logger.info(`[Config] Found targetDomain line: ${lines[i]}`);
+    //                 lines[i] = `        this.targetDomain = "${process.env.TARGET_DOMAIN}";`;
+    //                 this.logger.info(`[Config] Replaced with: ${lines[i]}`);
+    //                 domainReplaced = true;
+    //                 break;
+    //             }
+    //         }
+    //         if (domainReplaced) {
+    //             buildScriptContent = lines.join("\n");
+    //         } else {
+    //             this.logger.warn("[Config] Failed to find targetDomain line in build.js, ignoring.");
+    //         }
+    //     }
+    //
+    //     if (process.env.WS_PORT) {
+    //         // WS_PORT environment variable is no longer supported
+    //         this.logger.error(
+    //             `[Config] ❌ WS_PORT environment variable is deprecated and no longer supported. ` +
+    //                 `The WebSocket port is now fixed at 9998. Please remove WS_PORT from your .env file.`
+    //         );
+    //         // Do not modify the default WS_PORT - keep it at 9998
+    //     }
+    //
+    //     // Inject LOG_LEVEL configuration into build.js
+    //     // Read from LoggingService.currentLevel instead of environment variable
+    //     // This ensures runtime log level changes are respected when browser restarts
+    //     const LoggingService = require("../utils/LoggingService");
+    //     const currentLogLevel = LoggingService.currentLevel; // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
+    //     const currentLogLevelName = LoggingService.getLevel(); // "DEBUG", "INFO", etc.
+    //
+    //     if (currentLogLevel !== 1) {
+    //         const lines = buildScriptContent.split("\n");
+    //         let levelReplaced = false;
+    //         for (let i = 0; i < lines.length; i++) {
+    //             // Match "currentLevel: <number>," pattern, ignoring comments
+    //             // This is more robust than looking for specific comments like "// Default: INFO"
+    //             if (/^\s*currentLevel:\s*\d+/.test(lines[i])) {
+    //                 this.logger.info(`[Config] Found LOG_LEVEL config line: ${lines[i]}`);
+    //                 lines[i] = `    currentLevel: ${currentLogLevel}, // Injected: ${currentLogLevelName}`;
+    //                 this.logger.info(`[Config] Replaced with: ${lines[i]}`);
+    //                 levelReplaced = true;
+    //                 break;
+    //             }
+    //         }
+    //         if (levelReplaced) {
+    //             buildScriptContent = lines.join("\n");
+    //         } else {
+    //             this.logger.warn("[Config] Failed to find LOG_LEVEL config line in build.js, using default INFO.");
+    //         }
+    //     }
+    //
+    //     return buildScriptContent;
+    // }
 
     /**
-     * Helper: Inject script into editor and activate
-     * Contains the common UI interaction logic for both launchOrSwitchContext and attemptLightweightReconnect
-     * @param {string} buildScriptContent - The script content to inject
+     * Helper: Send active trigger and start health monitor
+     * Sends a trigger request to wake up Google backend and starts the health monitoring service
+     * This is a fire-and-forget operation - we don't wait for the trigger request to complete
      * @param {string} logPrefix - Log prefix for step messages (e.g., "[Browser]" or "[Reconnect]")
      */
-    async _injectScriptToEditor(buildScriptContent, logPrefix = "[Browser]") {
-        this.logger.info(`${logPrefix} Preparing UI interaction, forcefully removing all possible overlay layers...`);
-        /* eslint-disable no-undef */
-        await this.page.evaluate(() => {
-            const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
-            if (overlays.length > 0) {
-                console.log(`[ProxyClient] (Internal JS) Found and removed ${overlays.length} overlay layers.`);
-                overlays.forEach(el => el.remove());
-            }
-        });
-        /* eslint-enable no-undef */
-
-        this.logger.info(`${logPrefix} (Step 1/5) Preparing to click "Code" button...`);
-        const maxTimes = 15;
-        for (let i = 1; i <= maxTimes; i++) {
-            try {
-                this.logger.info(`  [Attempt ${i}/${maxTimes}] Cleaning overlay layers and clicking...`);
-                /* eslint-disable no-undef */
-                await this.page.evaluate(() => {
-                    document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
-                });
-                /* eslint-enable no-undef */
-                await this.page.waitForTimeout(500);
-
-                // Use Smart Click instead of hardcoded locator
-                await this._smartClickCode(this.page);
-
-                this.logger.info("  ✅ Click successful!");
-                break;
-            } catch (error) {
-                this.logger.warn(`  [Attempt ${i}/${maxTimes}] Click failed: ${error.message.split("\n")[0]}`);
-                if (i === maxTimes) {
-                    throw new Error(`Unable to click "Code" button after multiple attempts, initialization failed.`);
-                }
-            }
-        }
-
-        this.logger.info(
-            `${logPrefix} (Step 2/5) "Code" button clicked successfully, waiting for editor to become visible...`
-        );
-        const editorContainerLocator = this.page.locator("div.monaco-editor").first();
-        await editorContainerLocator.waitFor({
-            state: "visible",
-            timeout: 60000,
-        });
-
-        this.logger.info(
-            `${logPrefix} (Cleanup #2) Preparing to click editor, forcefully removing all possible overlay layers again...`
-        );
-        /* eslint-disable no-undef */
-        await this.page.evaluate(() => {
-            const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
-            if (overlays.length > 0) {
-                console.log(
-                    `[ProxyClient] (Internal JS) Found and removed ${overlays.length} newly appeared overlay layers.`
-                );
-                overlays.forEach(el => el.remove());
-            }
-        });
-        /* eslint-enable no-undef */
-        await this.page.waitForTimeout(250);
-
-        this.logger.info(`${logPrefix} (Step 3/5) Editor displayed, focusing and pasting script...`);
-        await editorContainerLocator.click({ timeout: 30000 });
-
-        /* eslint-disable no-undef */
-        await this.page.evaluate(text => navigator.clipboard.writeText(text), buildScriptContent);
-        /* eslint-enable no-undef */
-        const isMac = os.platform() === "darwin";
-        const pasteKey = isMac ? "Meta+V" : "Control+V";
-        await this.page.keyboard.press(pasteKey);
-        this.logger.info(`${logPrefix} (Step 4/5) Script pasted.`);
-        this.logger.info(`${logPrefix} (Step 5/5) Clicking "Preview" button to activate script...`);
-        await this.page.locator('button:text("Preview")').click();
-        this.logger.info(`${logPrefix} ✅ UI interaction complete, script is now running.`);
-
+    _sendActiveTriggerAndStartMonitor(logPrefix = "[Browser]") {
         // Active Trigger (Hack to wake up Google Backend)
         this.logger.info(`${logPrefix} ⚡ Sending active trigger request to Launch flow...`);
-        try {
-            await this.page.evaluate(async () => {
+
+        // Fire-and-forget: send trigger request in background without waiting
+        this.page
+            .evaluate(async () => {
                 try {
                     await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=ActiveTrigger", {
                         headers: { "Content-Type": "application/json" },
@@ -577,10 +502,10 @@ class BrowserManager {
                 } catch (e) {
                     console.log("[ProxyClient] Active trigger sent");
                 }
+            })
+            .catch(() => {
+                // Silently ignore errors - this is a best-effort trigger
             });
-        } catch (e) {
-            /* empty */
-        }
 
         this._startHealthMonitor();
     }
@@ -598,29 +523,25 @@ class BrowserManager {
         });
         this.logger.info(`${logPrefix} Page loaded.`);
 
-        // Wake up window using JS and Human Movement
+        // Wake up window with mouse movement (without clicking)
         try {
             await this.page.bringToFront();
 
             // Get viewport size for realistic movement range
             const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
 
-            // 1. Move to a random point to simulate activity
+            // Move to a random point to simulate activity
             const randomX = Math.floor(Math.random() * (vp.width * 0.7));
             const randomY = Math.floor(Math.random() * (vp.height * 0.7));
             await this._simulateHumanMovement(this.page, randomX, randomY);
 
-            // 2. Move to (1,1) specifically for a safe click, using human simulation
-            await this._simulateHumanMovement(this.page, 1, 1);
-            await this.page.mouse.down();
-            await this.page.waitForTimeout(50 + Math.random() * 100);
-            await this.page.mouse.up();
-
-            this.logger.info(`${logPrefix} ✅ Executed realistic page activation (Random -> 1,1 Click).`);
+            this.logger.info(`${logPrefix} ✅ Executed realistic mouse movement for page activation.`);
         } catch (e) {
-            this.logger.warn(`${logPrefix} Wakeup minor error: ${e.message}`);
+            this.logger.warn(`${logPrefix} Mouse movement minor error: ${e.message}`);
         }
-        await this.page.waitForTimeout(2000 + Math.random() * 2000);
+
+        // Wait for page to stabilize
+        await this.page.waitForTimeout(2000 + Math.random() * 1000);
     }
 
     /**
@@ -629,42 +550,42 @@ class BrowserManager {
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
      * @throws {Error} If navigation fails after retry
      */
-    async _verifyAndRetryNavigation(logPrefix = "[Browser]") {
-        let currentUrl = this.page.url();
-
-        if (!currentUrl.includes(this.expectedAppId)) {
-            this.logger.warn(`${logPrefix} ⚠️ Page redirected to: ${currentUrl}`);
-            this.logger.info(`${logPrefix} Expected app ID: ${this.expectedAppId}`);
-            this.logger.info(`${logPrefix} Attempting to navigate again...`);
-
-            // Reset WebSocket initialization flags before re-navigation
-            this._wsInitSuccess = false;
-            this._wsInitFailed = false;
-
-            // Wait a bit before retrying
-            await this.page.waitForTimeout(2000);
-
-            // Try navigating again
-            await this.page.goto(this.targetUrl, {
-                timeout: 180000,
-                waitUntil: "domcontentloaded",
-            });
-            await this.page.waitForTimeout(2000);
-
-            // Check URL again
-            currentUrl = this.page.url();
-            if (!currentUrl.includes(this.expectedAppId)) {
-                this.logger.error(`${logPrefix} ❌ Still on wrong page after retry: ${currentUrl}`);
-                throw new Error(
-                    `Failed to navigate to correct page. Current URL: ${currentUrl}, Expected app ID: ${this.expectedAppId}`
-                );
-            } else {
-                this.logger.info(`${logPrefix} ✅ Successfully navigated to correct page on retry: ${currentUrl}`);
-            }
-        } else {
-            this.logger.info(`${logPrefix} ✅ Confirmed on correct page: ${currentUrl}`);
-        }
-    }
+    // async _verifyAndRetryNavigation(logPrefix = "[Browser]") {
+    //     let currentUrl = this.page.url();
+    //
+    //     if (!currentUrl.includes(this.expectedAppId)) {
+    //         this.logger.warn(`${logPrefix} ⚠️ Page redirected to: ${currentUrl}`);
+    //         this.logger.info(`${logPrefix} Expected app ID: ${this.expectedAppId}`);
+    //         this.logger.info(`${logPrefix} Attempting to navigate again...`);
+    //
+    //         // Reset WebSocket initialization flags before re-navigation
+    //         this._wsInitSuccess = false;
+    //         this._wsInitFailed = false;
+    //
+    //         // Wait a bit before retrying
+    //         await this.page.waitForTimeout(2000);
+    //
+    //         // Try navigating again
+    //         await this.page.goto(this.targetUrl, {
+    //             timeout: 180000,
+    //             waitUntil: "domcontentloaded",
+    //         });
+    //         await this.page.waitForTimeout(2000);
+    //
+    //         // Check URL again
+    //         currentUrl = this.page.url();
+    //         if (!currentUrl.includes(this.expectedAppId)) {
+    //             this.logger.error(`${logPrefix} ❌ Still on wrong page after retry: ${currentUrl}`);
+    //             throw new Error(
+    //                 `Failed to navigate to correct page. Current URL: ${currentUrl}, Expected app ID: ${this.expectedAppId}`
+    //             );
+    //         } else {
+    //             this.logger.info(`${logPrefix} ✅ Successfully navigated to correct page on retry: ${currentUrl}`);
+    //         }
+    //     } else {
+    //         this.logger.info(`${logPrefix} ✅ Confirmed on correct page: ${currentUrl}`);
+    //     }
+    // }
 
     /**
      * Helper: Check page status and detect various error conditions
@@ -721,11 +642,6 @@ class BrowserManager {
 
         const popupConfigs = [
             {
-                logFound: `${logPrefix} ✅ Found "Continue to the app" button, clicking...`,
-                name: "Continue to the app",
-                selector: 'button:text("Continue to the app")',
-            },
-            {
                 logFound: `${logPrefix} ✅ Found Cookie consent banner, clicking "Agree"...`,
                 name: "Cookie consent",
                 selector: 'button:text("Agree")',
@@ -746,29 +662,14 @@ class BrowserManager {
                 selector: 'button[aria-label="Close"]',
             },
             {
-                logFound: `${logPrefix} ✅ Found "Dismiss" button, clicking...`,
-                name: "Dismiss button",
-                selector: 'button:text("Dismiss")',
-            },
-            {
-                logFound: `${logPrefix} ✅ Found "Not now" button, clicking...`,
-                name: "Not now button",
-                selector: 'button:text("Not now")',
-            },
-            {
-                logFound: `${logPrefix} ✅ Found "Maybe later" button, clicking...`,
-                name: "Maybe later button",
-                selector: 'button:text("Maybe later")',
-            },
-            {
                 logFound: `${logPrefix} ✅ Found "Skip" button, clicking...`,
                 name: "Skip button",
                 selector: 'button:text-is("Skip")',
             },
             {
-                logFound: `${logPrefix} ✅ Found update notification, clicking close...`,
-                name: "Update notification",
-                selector: 'button[aria-label="Close notification"]',
+                logFound: `${logPrefix} ✅ Found "Continue to the app" button, clicking...`,
+                name: "Continue to the app",
+                selector: 'button:text("Continue to the app")',
             },
         ];
 
@@ -789,15 +690,40 @@ class BrowserManager {
                 if (handledPopups.has(popup.name)) continue;
 
                 try {
-                    const element = this.page.locator(popup.selector).first();
-                    // Quick visibility check with very short timeout
-                    if (await element.isVisible({ timeout: 200 })) {
-                        this.logger.info(popup.logFound);
-                        await element.click({ force: true });
-                        handledPopups.add(popup.name);
-                        foundAny = true;
-                        // Short pause after clicking to let next popup appear
-                        await this.page.waitForTimeout(800);
+                    // Special handling for "Continue to the app" button using page.evaluate()
+                    if (popup.name === "Continue to the app") {
+                        const clicked = await this.page.evaluate(() => {
+                            // eslint-disable-next-line no-undef
+                            const btns = Array.from(document.querySelectorAll("button"));
+                            const target = btns.find(b => b.innerText && b.innerText.includes("Continue to the app"));
+                            if (target) {
+                                target.click();
+                                return true;
+                            }
+                            return false;
+                        });
+
+                        if (clicked) {
+                            this.logger.info(popup.logFound);
+                            this.logger.info(
+                                `${logPrefix} ⚡ Confirmed entry to app, exiting popup detection loop early.`
+                            );
+                            handledPopups.add(popup.name);
+                            // Exit immediately after clicking Continue button
+                            return;
+                        }
+                    } else {
+                        // Normal handling for other popups
+                        const element = this.page.locator(popup.selector).first();
+                        // Quick visibility check with very short timeout
+                        if (await element.isVisible({ timeout: 200 })) {
+                            this.logger.info(popup.logFound);
+                            await element.click({ force: true });
+                            handledPopups.add(popup.name);
+                            foundAny = true;
+                            // Short pause after clicking to let next popup appear
+                            await this.page.waitForTimeout(800);
+                        }
                     }
                 } catch (error) {
                     // Element not visible or doesn't exist is expected here,
@@ -934,13 +860,11 @@ class BrowserManager {
                     }
                 }
 
-                // 2. Anti-Timeout: Click top-left corner (1,1) every ~1 minute (15 ticks)
+                // 2. Anti-Timeout: Move mouse to top-left corner (1,1) every ~1 minute (15 ticks)
+                // Note: Only move, do not click to avoid triggering page elements
                 if (tickCount % 15 === 0) {
                     try {
                         await this._simulateHumanMovement(page, 1, 1);
-                        await page.mouse.down();
-                        await page.waitForTimeout(100 + Math.random() * 100);
-                        await page.mouse.up();
                     } catch (e) {
                         /* empty */
                     }
@@ -977,7 +901,6 @@ class BrowserManager {
                     // Click active buttons if visible
                     // eslint-disable-next-line no-undef
                     document.querySelectorAll("button").forEach(btn => {
-                        // 检查元素是否占据空间（简单的可见性检查）
                         const rect = btn.getBoundingClientRect();
                         const isVisible = rect.width > 0 && rect.height > 0;
 
@@ -985,7 +908,6 @@ class BrowserManager {
                             const text = (btn.innerText || "").trim();
                             const ariaLabel = btn.getAttribute("aria-label");
 
-                            // 匹配文本 或 aria-label
                             if (targetTexts.includes(text) || ariaLabel === "Close") {
                                 console.log(`[ProxyClient] HealthMonitor clicking: ${text || "Close Button"}`);
                                 btn.click();
@@ -1328,7 +1250,7 @@ class BrowserManager {
 
             this.page = await this.context.newPage();
 
-            // Pure JS Wakeup (Focus & Click)
+            // Pure JS Wakeup (Focus & Mouse Movement)
             try {
                 await this.page.bringToFront();
                 // eslint-disable-next-line no-undef
@@ -1338,10 +1260,7 @@ class BrowserManager {
                 const startX = Math.floor(Math.random() * (vp.width * 0.5));
                 const startY = Math.floor(Math.random() * (vp.height * 0.5));
                 await this._simulateHumanMovement(this.page, startX, startY);
-                await this.page.mouse.down();
-                await this.page.waitForTimeout(100);
-                await this.page.mouse.up();
-                this.logger.info("[Browser] ⚡ Forced window wake-up via JS focus.");
+                this.logger.info("[Browser] ⚡ Forced window wake-up via JS focus and mouse movement.");
             } catch (e) {
                 this.logger.warn(`[Browser] Wakeup minor error: ${e.message}`);
             }
@@ -1382,10 +1301,7 @@ class BrowserManager {
             // Check for cookie expiration, region restrictions, and other errors
             await this._checkPageStatusAndErrors("[Browser]");
 
-            // Check if we were redirected to the wrong page BEFORE handling popups
-            await this._verifyAndRetryNavigation("[Browser]");
-
-            // Handle various popups AFTER URL check (Cookie consent, Got it, Onboarding, etc.)
+            // Handle various popups (Cookie consent, Got it, Onboarding, Continue to the app, etc.)
             await this._handlePopups("[Browser]");
 
             // Try to click Launch button if it exists (not a popup, but a page button)
@@ -1443,7 +1359,7 @@ class BrowserManager {
 
             // Start background services - only started here during initial browser launch
             this._startBackgroundWakeup();
-            this._startHealthMonitor();
+            this._sendActiveTriggerAndStartMonitor();
 
             this._currentAuthIndex = authIndex;
 
@@ -1503,16 +1419,18 @@ class BrowserManager {
         }
 
         try {
+            // Reset WebSocket initialization flags to ensure clean state for reconnection
+            this._wsInitSuccess = false;
+            this._wsInitFailed = false;
+            this.logger.info("[Reconnect] Reset WebSocket initialization flags");
+
             // Navigate to target page and wake it up
             await this._navigateAndWakeUpPage("[Reconnect]");
 
             // Check for cookie expiration, region restrictions, and other errors
             await this._checkPageStatusAndErrors("[Reconnect]");
 
-            // Check if we were redirected to the wrong page BEFORE handling popups
-            await this._verifyAndRetryNavigation("[Reconnect]");
-
-            // Handle various popups AFTER URL check (Cookie consent, Got it, Onboarding, etc.)
+            // Handle various popups (Cookie consent, Got it, Onboarding, Continue to the app, etc.)
             await this._handlePopups("[Reconnect]");
 
             // Try to click Launch button if it exists (not a popup, but a page button)
@@ -1570,7 +1488,7 @@ class BrowserManager {
             // Restart health monitor after successful reconnect
             // Note: _startBackgroundWakeup is not restarted because it's a continuous loop
             // that checks this.page === currentPage, and will continue running after page reload
-            this._startHealthMonitor();
+            this._sendActiveTriggerAndStartMonitor();
 
             // [Auth Update] Save the refreshed cookies to the auth file immediately
             await this._updateAuthFile(authIndex);
