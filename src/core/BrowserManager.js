@@ -1299,6 +1299,11 @@ class BrowserManager {
                         return;
                     }
 
+                    // Filter out WebGL not supported warning (expected when GPU is disabled for privacy)
+                    if (msgText.includes("WebGL not supported")) {
+                        return;
+                    }
+
                     if (msgText.includes("[ProxyClient]")) {
                         this.logger.info(`[Browser] ${msgText.replace("[ProxyClient] ", "")}`);
                     } else if (msg.type() === "error") {
