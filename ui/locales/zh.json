@@ -53,6 +53,7 @@
     "authSessionClosedUnexpected": "连接意外中断。",
     "authSessionNoticeText": "此 VNC 会话是临时的，如果 10 分钟无活动或点击保存后将自动关闭。",
     "authSessionNoticeTitle": "会话提示",
+    "autoSwitch": "自动切换",
     "authStartVncFailed": "启动 VNC 会话失败",
     "authStartVncFailedDetail": "此功能需要安装了 <code>Xvfb</code>、<code>x11vnc</code> 和 <code>websockify</code> 的 Linux 系统。",
     "authVncContainerMissing": "VNC 容器丢失。",

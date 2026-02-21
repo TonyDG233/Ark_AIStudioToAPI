@@ -22,6 +22,8 @@ class ConfigLoader {
             apiKeys: [],
             apiKeySource: "Not set",
             browserExecutablePath: null,
+            enableAutoSwitch: false,
+            autoSwitchIntervalHours: 3,
             enableAuthUpdate: true,
             failureThreshold: 3,
             forceThinking: false,
@@ -68,7 +70,12 @@ class ConfigLoader {
             config.forceUrlContext = process.env.FORCE_URL_CONTEXT.toLowerCase() === "true";
         if (process.env.ENABLE_AUTH_UPDATE)
             config.enableAuthUpdate = process.env.ENABLE_AUTH_UPDATE.toLowerCase() !== "false";
-
+        if (process.env.ENABLE_AUTO_SWITCH)
+            config.enableAutoSwitch = process.env.ENABLE_AUTO_SWITCH.toLowerCase() === "true";
+        if (process.env.AUTO_SWITCH_INTERVAL_HOURS)
+            config.autoSwitchIntervalHours =
+                Math.max(0.1, parseFloat(process.env.AUTO_SWITCH_INTERVAL_HOURS)) || config.autoSwitchIntervalHours;
+ 
         let rawCodes = process.env.IMMEDIATE_SWITCH_STATUS_CODES;
         let codesSource = "environment variable";
 
@@ -153,6 +160,13 @@ class ConfigLoader {
         this.logger.info(
             `  Failure-based Switch: ${
                 config.failureThreshold > 0 ? `Switch after ${config.failureThreshold} failures` : "Disabled"
+            }`
+        );
+        this.logger.info(
+            `  Auto-Switch Timer: ${
+                config.enableAutoSwitch
+                    ? `Enabled, switch every ${config.autoSwitchIntervalHours} hours`
+                    : "Disabled"
             }`
         );
         this.logger.info(

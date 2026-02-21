@@ -53,6 +53,7 @@
     "authSessionClosedUnexpected": "Connection dropped unexpectedly.",
     "authSessionNoticeText": "This VNC session is temporary and will automatically close after 10 minutes of inactivity or after saving.",
     "authSessionNoticeTitle": "Session Notice",
+    "autoSwitch": "Auto Switch",
     "authStartVncFailed": "Failed to start VNC session",
     "authStartVncFailedDetail": "This feature requires Linux with <code>Xvfb</code>, <code>x11vnc</code>, and <code>websockify</code> installed.",
     "authVncContainerMissing": "VNC container is missing.",

@@ -509,6 +509,18 @@
                                 </span>
                                 <span class="value status-text-bold">{{ apiKeySourceText }}</span>
                             </div>
+                            <div class="status-item" v-if="state.enableAutoSwitch">
+                                <span class="label">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; vertical-align: middle">
+                                        <path d="M21.5 2v6h-6"></path>
+                                        <path d="M2.5 22v-6h6"></path>
+                                        <path d="M22 11.5A10 10 0 0 0 3.5 12.5"></path>
+                                        <path d="M2 12.5a10 10 0 0 0 18.5-1"></path>
+                                    </svg>
+                                    {{ t("autoSwitch") }}
+                                </span>
+                                <span class="value status-text-bold status-ok">{{ nextSwitchTime }}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1480,6 +1492,9 @@ const state = reactive({
     forceThinkingEnabled: false,
     forceUrlContextEnabled: false,
     forceWebSearchEnabled: false,
+    enableAutoSwitch: false,
+    autoSwitchIntervalHours: 0,
+    nextSwitchTimestamp: -1,
     hasUpdate: false,
     isSwitchingAccount: false,
     isSystemBusy: false,
@@ -1737,6 +1752,20 @@ const apiKeySourceText = computed(() => {
     const key = state.apiKeySource ? state.apiKeySource.toLowerCase() : "";
     const translated = key ? t(key) : "";
     return translated === key ? state.apiKeySource : translated || state.apiKeySource;
+});
+
+const nextSwitchTime = computed(() => {
+    if (!state.enableAutoSwitch || state.nextSwitchTimestamp <= 0) {
+        return t("disabled");
+    }
+    const now = Date.now();
+    const remaining = state.nextSwitchTimestamp - now;
+    if (remaining <= 0) {
+        return t("switching");
+    }
+    const hours = Math.floor(remaining / (1000 * 60 * 60));
+    const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours}h ${minutes}m`;
 });
 
 // App version from build-time injection
@@ -2112,6 +2141,9 @@ const updateStatus = data => {
     state.forceWebSearchEnabled = isEnabled(data.status.forceWebSearch);
     state.forceUrlContextEnabled = isEnabled(data.status.forceUrlContext);
     state.debugModeEnabled = isEnabled(data.status.debugMode);
+    state.enableAutoSwitch = isEnabled(data.status.enableAutoSwitch);
+    state.autoSwitchIntervalHours = data.status.autoSwitchIntervalHours;
+    state.nextSwitchTimestamp = data.status.nextSwitchTimestamp;
     state.currentAuthIndex = data.status.currentAuthIndex;
     state.accountDetails = data.status.accountDetails || [];
 

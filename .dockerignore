@@ -68,3 +68,4 @@ camoufox*
 
 # Auth setup scripts (not needed in Linux container)
 scripts/auth
+.local_logs

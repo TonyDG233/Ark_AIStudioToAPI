@@ -653,8 +653,28 @@ class StatusRoutes {
                 rotationIndicesRaw: rotationIndices,
                 streamingMode: this.serverSystem.streamingMode,
                 usageCount,
+                enableAutoSwitch: this.config.enableAutoSwitch,
+                autoSwitchIntervalHours: this.config.autoSwitchIntervalHours,
+                nextSwitchTimestamp: this._getNextSwitchTimestamp(),
             },
         };
+    }
+
+    _getNextSwitchTimestamp() {
+        if (!this.serverSystem.autoSwitchTimer) {
+            return -1;
+        }
+        const now = Date.now();
+        const interval = this.config.autoSwitchIntervalHours * 60 * 60 * 1000;
+
+        // Access the internal _lastExecution property if it exists
+        if (this.serverSystem.autoSwitchTimer._lastExecution) {
+            return this.serverSystem.autoSwitchTimer._lastExecution + interval;
+        }
+        
+        // Fallback if _lastExecution is not available (e.g. different Node.js versions)
+        // This provides an approximation.
+        return now + interval;
     }
 }
 

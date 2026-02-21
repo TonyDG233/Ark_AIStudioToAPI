@@ -84,8 +84,9 @@ class ProxyServerSystem extends EventEmitter {
         this.httpServer = null;
         this.wsServer = null;
         this.webRoutes = new WebRoutes(this);
+        this.autoSwitchTimer = null;
     }
-
+ 
     async start(initialAuthIndex = null) {
         this.logger.info("[System] Starting flexible startup process...");
         await this._startHttpServer();
@@ -152,8 +153,44 @@ class ProxyServerSystem extends EventEmitter {
         }
 
         this.emit("started");
+
+        // Start the auto-switch timer if enabled
+        this._startAutoSwitchTimer();
     }
 
+    // ========================================================================
+    // MODIFICATION: Start of auto-account-switching logic
+    // ========================================================================
+    _startAutoSwitchTimer() {
+        if (!this.config.enableAutoSwitch) {
+            this.logger.info("[System] ⏰ Auto-account-switching is disabled.");
+            return;
+        }
+
+        const interval = this.config.autoSwitchIntervalHours * 60 * 60 * 1000;
+        this.logger.info(`[System] ⏰ Started auto-account-switching timer, interval: ${this.config.autoSwitchIntervalHours} hours.`);
+
+        if (this.autoSwitchTimer) clearInterval(this.autoSwitchTimer);
+
+        this.autoSwitchTimer = setInterval(async () => {
+            this.logger.info(`[System] ⏰ Triggering scheduled account switch...`);
+
+            try {
+                const result = await this.requestHandler._switchToNextAuth();
+                if (result.success) {
+                    this.logger.info(`[System] ✅ Scheduled switch successful, current account: #${result.newIndex}`);
+                } else {
+                    this.logger.warn(`[System] ⚠️ Scheduled switch not executed: ${result.reason}`);
+                }
+            } catch (error) {
+                this.logger.error(`[System] ❌ Scheduled switch failed: ${error.message}`);
+            }
+        }, interval);
+    }
+    // ========================================================================
+    // MODIFICATION: End of auto-account-switching logic
+    // ========================================================================
+ 
     _createAuthMiddleware() {
         return (req, res, next) => {
             // Allow access if session is authenticated (e.g. browser accessing /vnc or API from UI)
