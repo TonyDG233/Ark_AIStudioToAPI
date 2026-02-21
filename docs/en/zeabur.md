@@ -8,8 +8,8 @@ This guide will help you deploy the `aistudio-to-api` service on [Zeabur](https:
 ## 📦 Deployment Steps
 
 1. **Login**: Go to [https://zeabur.com/projects](https://zeabur.com/projects) and log in to your account.
-2. **Create Project**: Click the **Create Project** button, and select **Jakarta, Indonesia** as the region.
-3. **Select Service Type**: Select **Docker Container Image**.
+2. **New Project**: Click the **New Project** button, select **Shared Cluster**, then select **Jakarta, Indonesia** as the region.
+3. **Deploy Service**: Click **Deploy New Service**, select **Add Service**, then choose **Docker Image**.
 4. **Configure Application**: Fill in the following parameters:
 
    **Image**:
@@ -30,6 +30,11 @@ This guide will help you deploy the `aistudio-to-api` service on [Zeabur](https:
    - Click the **Add Port** button.
    - **Port Number**: `7860`
    - **Port Type**: `HTTP`
+
+   **Volumes**:
+   - Click the **Add Volume** button.
+   - **Volume ID**: `auth`
+   - **Path**: `/app/configs/auth`
 
 5. **Deploy**: Click the **Deploy** button to start the deployment.
 6. **Configure Public Access**:
