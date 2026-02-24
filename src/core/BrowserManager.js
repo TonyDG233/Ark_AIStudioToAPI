@@ -167,18 +167,6 @@ class BrowserManager {
                     return false;
                 }
 
-                // Random mouse movement while waiting (30% chance per iteration)
-                if (Math.random() < 0.3) {
-                    try {
-                        const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
-                        const randomX = Math.floor(Math.random() * (vp.width * 0.7));
-                        const randomY = Math.floor(Math.random() * (vp.height * 0.7));
-                        await this._simulateHumanMovement(this.page, randomX, randomY);
-                    } catch (e) {
-                        // Ignore movement errors
-                    }
-                }
-
                 // Wait before next check
                 await this.page.waitForTimeout(checkInterval);
             }
@@ -523,23 +511,6 @@ class BrowserManager {
         });
         this.logger.info(`${logPrefix} Page loaded.`);
 
-        // Wake up window with mouse movement (without clicking)
-        try {
-            await this.page.bringToFront();
-
-            // Get viewport size for realistic movement range
-            const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
-
-            // Move to a random point to simulate activity
-            const randomX = Math.floor(Math.random() * (vp.width * 0.7));
-            const randomY = Math.floor(Math.random() * (vp.height * 0.7));
-            await this._simulateHumanMovement(this.page, randomX, randomY);
-
-            this.logger.info(`${logPrefix} ✅ Executed realistic mouse movement for page activation.`);
-        } catch (e) {
-            this.logger.warn(`${logPrefix} Mouse movement minor error: ${e.message}`);
-        }
-
         // Wait for page to stabilize
         await this.page.waitForTimeout(2000 + Math.random() * 1000);
     }
@@ -642,31 +613,6 @@ class BrowserManager {
 
         const popupConfigs = [
             {
-                logFound: `${logPrefix} ✅ Found Cookie consent banner, clicking "Agree"...`,
-                name: "Cookie consent",
-                selector: 'button:text("Agree")',
-            },
-            {
-                logFound: `${logPrefix} ✅ Found "Got it" popup, clicking...`,
-                name: "Got it dialog",
-                selector: 'div.dialog button:text("Got it")',
-            },
-            {
-                logFound: `${logPrefix} ✅ Found "Got it" button (generic), clicking...`,
-                name: "Got it button",
-                selector: 'button:text("Got it")',
-            },
-            {
-                logFound: `${logPrefix} ✅ Found onboarding tutorial popup, clicking close button...`,
-                name: "Onboarding tutorial",
-                selector: 'button[aria-label="Close"]',
-            },
-            {
-                logFound: `${logPrefix} ✅ Found "Skip" button, clicking...`,
-                name: "Skip button",
-                selector: 'button:text-is("Skip")',
-            },
-            {
                 logFound: `${logPrefix} ✅ Found "Continue to the app" button, clicking...`,
                 name: "Continue to the app",
                 selector: 'button:text("Continue to the app")',
@@ -690,40 +636,21 @@ class BrowserManager {
                 if (handledPopups.has(popup.name)) continue;
 
                 try {
-                    // Special handling for "Continue to the app" button using page.evaluate()
-                    if (popup.name === "Continue to the app") {
-                        const clicked = await this.page.evaluate(() => {
-                            // eslint-disable-next-line no-undef
-                            const btns = Array.from(document.querySelectorAll("button"));
-                            const target = btns.find(b => b.innerText && b.innerText.includes("Continue to the app"));
-                            if (target) {
-                                target.click();
-                                return true;
-                            }
-                            return false;
-                        });
+                    const element = this.page.locator(popup.selector).first();
+                    // Quick visibility check with very short timeout
+                    if (await element.isVisible({ timeout: 200 })) {
+                        this.logger.info(popup.logFound);
+                        await element.click({ force: true });
+                        handledPopups.add(popup.name);
+                        foundAny = true;
 
-                        if (clicked) {
-                            this.logger.info(popup.logFound);
-                            this.logger.info(
-                                `${logPrefix} ⚡ Confirmed entry to app, exiting popup detection loop early.`
-                            );
-                            handledPopups.add(popup.name);
-                            // Exit immediately after clicking Continue button
+                        // "Continue to the app" confirms entry, exit popup detection early
+                        if (popup.name === "Continue to the app") {
                             return;
                         }
-                    } else {
-                        // Normal handling for other popups
-                        const element = this.page.locator(popup.selector).first();
-                        // Quick visibility check with very short timeout
-                        if (await element.isVisible({ timeout: 200 })) {
-                            this.logger.info(popup.logFound);
-                            await element.click({ force: true });
-                            handledPopups.add(popup.name);
-                            foundAny = true;
-                            // Short pause after clicking to let next popup appear
-                            await this.page.waitForTimeout(800);
-                        }
+
+                        // Short pause after clicking to let next popup appear
+                        await this.page.waitForTimeout(800);
                     }
                 } catch (error) {
                     // Element not visible or doesn't exist is expected here,
