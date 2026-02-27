@@ -6,6 +6,7 @@
  */
 
 const fs = require("fs");
+const fsPromises = require("fs").promises;
 const path = require("path");
 
 /**
@@ -21,6 +22,8 @@ class AuthSource {
         this.rotationIndices = [];
         // Duplicate auth indices detected (valid JSON but skipped from rotation due to same email)
         this.duplicateIndices = [];
+        // Expired auth indices (valid JSON but marked as expired, excluded from rotation)
+        this.expiredIndices = [];
         this.initialIndices = [];
         this.accountNameMap = new Map();
         // Map any valid index -> canonical (latest) index for the same account email
@@ -107,6 +110,7 @@ class AuthSource {
             this.availableIndices = [];
             this.rotationIndices = [];
             this.duplicateIndices = [];
+            this.expiredIndices = [];
             this.accountNameMap.clear();
             this.canonicalIndexMap.clear();
             this.duplicateGroups = [];
@@ -118,6 +122,7 @@ class AuthSource {
         this.accountNameMap.clear(); // Clear old names before re-validating
         this.canonicalIndexMap.clear();
         this.duplicateGroups = [];
+        this.expiredIndices = [];
 
         for (const index of this.initialIndices) {
             // Iterate over initial to check all, not just previously available
@@ -127,6 +132,10 @@ class AuthSource {
                     const authData = JSON.parse(authContent);
                     validIndices.push(index);
                     this.accountNameMap.set(index, authData.accountName || null);
+                    // Track expired status from auth file
+                    if (authData.expired === true) {
+                        this.expiredIndices.push(index);
+                    }
                 } catch (e) {
                     invalidSourceDescriptions.push(`auth-${index} (parse error)`);
                 }
@@ -163,10 +172,14 @@ class AuthSource {
         this.rotationIndices = [];
         this.duplicateIndices = [];
         this.duplicateGroups = [];
+        this.canonicalIndexMap.clear();
 
         const emailKeyToIndices = new Map();
 
-        for (const index of this.availableIndices) {
+        // Only process non-expired accounts for rotation and deduplication
+        const nonExpiredIndices = this.availableIndices.filter(idx => !this.expiredIndices.includes(idx));
+
+        for (const index of nonExpiredIndices) {
             const accountName = this.accountNameMap.get(index);
             const emailKey = this._normalizeEmailKey(accountName);
 
@@ -213,6 +226,13 @@ class AuthSource {
                     `Rotation will only use latest index per account: [${this.rotationIndices.join(", ")}].`
             );
         }
+
+        if (this.expiredIndices.length > 0) {
+            this.logger.warn(
+                `[Auth] Detected ${this.expiredIndices.length} expired auth files: [${this.expiredIndices.join(", ")}]. ` +
+                    `These accounts are excluded from automatic rotation.`
+            );
+        }
     }
 
     _getAuthContent(index) {
@@ -257,6 +277,102 @@ class AuthSource {
 
     getDuplicateGroups() {
         return this.duplicateGroups;
+    }
+
+    /**
+     * Mark an auth as expired
+     *
+     * Side effects:
+     * - Adds "expired": true to the auth file (configs/auth/auth-{index}.json)
+     * - Adds index to this.expiredIndices array
+     * - Rebuilds rotation indices (calls this._buildRotationIndices()) to exclude the expired account from rotation
+     * - Updates canonicalIndexMap to reflect the new rotation state
+     *
+     * @param {number} index - Auth index to mark as expired
+     * @returns {Promise<boolean>} True if successfully marked as expired, false if auth doesn't exist, is already expired, or file operation fails
+     */
+    async markAsExpired(index) {
+        if (!this.availableIndices.includes(index)) {
+            this.logger.warn(`[Auth] Cannot mark non-existent auth #${index} as expired`);
+            return false;
+        }
+
+        if (this.expiredIndices.includes(index)) {
+            this.logger.debug(`[Auth] Auth #${index} is already marked as expired`);
+            return false;
+        }
+
+        const authFilePath = path.join(process.cwd(), "configs", "auth", `auth-${index}.json`);
+        try {
+            const fileContent = await fsPromises.readFile(authFilePath, "utf-8");
+            const authData = JSON.parse(fileContent);
+            authData.expired = true;
+            await fsPromises.writeFile(authFilePath, JSON.stringify(authData, null, 2));
+
+            this.expiredIndices.push(index);
+
+            // Rebuild rotation indices to exclude this expired account
+            // This will properly rebuild canonicalIndexMap and handle duplicate relationships
+            this._buildRotationIndices();
+
+            this.logger.warn(`[Auth] ⏰ Marked auth #${index} as expired`);
+            return true;
+        } catch (error) {
+            this.logger.error(`[Auth] Failed to mark auth #${index} as expired: ${error.message}`);
+            return false;
+        }
+    }
+
+    /**
+     * Unmark an auth as expired (restore it to active status)
+     *
+     * Side effects:
+     * - Removes "expired" field from the auth file (configs/auth/auth-{index}.json)
+     * - Removes index from this.expiredIndices array
+     * - Rebuilds rotation indices (calls this._buildRotationIndices()) to include the restored account in rotation
+     * - Updates canonicalIndexMap to reflect the new rotation state
+     *
+     * @param {number} index - Auth index to restore
+     * @returns {Promise<boolean>} True if successfully restored, false if auth doesn't exist, is not expired, or file operation fails
+     */
+    async unmarkAsExpired(index) {
+        if (!this.availableIndices.includes(index)) {
+            this.logger.warn(`[Auth] Cannot unmark non-existent auth #${index}`);
+            return false;
+        }
+
+        if (!this.expiredIndices.includes(index)) {
+            this.logger.debug(`[Auth] Auth #${index} is not marked as expired`);
+            return false;
+        }
+
+        const authFilePath = path.join(process.cwd(), "configs", "auth", `auth-${index}.json`);
+        try {
+            const fileContent = await fsPromises.readFile(authFilePath, "utf-8");
+            const authData = JSON.parse(fileContent);
+            delete authData.expired;
+            await fsPromises.writeFile(authFilePath, JSON.stringify(authData, null, 2));
+
+            this.expiredIndices = this.expiredIndices.filter(idx => idx !== index);
+
+            // Rebuild rotation indices to include this restored account
+            this._buildRotationIndices();
+
+            this.logger.info(`[Auth] ✅ Restored auth #${index} from expired status`);
+            return true;
+        } catch (error) {
+            this.logger.error(`[Auth] Failed to restore auth #${index}: ${error.message}`);
+            return false;
+        }
+    }
+
+    /**
+     * Check if an auth is expired
+     * @param {number} index - Auth index to check
+     * @returns {boolean}
+     */
+    isExpired(index) {
+        return this.expiredIndices.includes(index);
     }
 }
 

@@ -749,6 +749,9 @@
                                         <span v-if="item.index === state.currentAuthIndex" class="current-badge">
                                             {{ t("tagCurrent") }}
                                         </span>
+                                        <span v-if="item.isExpired" class="expired-badge">
+                                            {{ t("tagExpired") }}
+                                        </span>
                                     </div>
                                 </el-tooltip>
                                 <div class="account-actions">
@@ -3162,6 +3165,17 @@ watchEffect(() => {
     font-size: 0.75rem;
     padding: 2px 8px;
     background: @success-color;
+    color: @text-on-primary;
+    border-radius: 12px;
+    flex-shrink: 0;
+    margin-left: 0;
+    margin-right: 6px;
+}
+
+.expired-badge {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    background: @error-color;
     color: @text-on-primary;
     border-radius: 12px;
     flex-shrink: 0;
