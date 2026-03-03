@@ -277,7 +277,10 @@
                                         <line x1="12" y1="20" x2="12" y2="4"></line>
                                         <line x1="6" y1="20" x2="6" y2="14"></line>
                                     </svg>
-                                    {{ t("usageCount") }}
+                                    <span>
+                                        {{ t("usageCount") }}
+                                        <EnvVarTooltip env-var="SWITCH_ON_USES" doc-section="proxy-config" />
+                                    </span>
                                 </span>
                                 <span class="value">{{ state.usageCount }}</span>
                             </div>
@@ -301,7 +304,10 @@
                                         <line x1="12" y1="9" x2="12" y2="13"></line>
                                         <line x1="12" y1="17" x2="12.01" y2="17"></line>
                                     </svg>
-                                    {{ t("consecutiveFailures") }}
+                                    <span>
+                                        {{ t("consecutiveFailures") }}
+                                        <EnvVarTooltip env-var="FAILURE_THRESHOLD" doc-section="proxy-config" />
+                                    </span>
                                 </span>
                                 <span class="value">{{ state.failureCount }}</span>
                             </div>
@@ -364,7 +370,10 @@
                                         <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
                                         <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
                                     </svg>
-                                    {{ t("activeContexts") }}
+                                    <span>
+                                        {{ t("activeContexts") }}
+                                        <EnvVarTooltip env-var="MAX_CONTEXTS" doc-section="proxy-config" />
+                                    </span>
                                 </span>
                                 <span class="value">{{ activeContextsDisplay }}</span>
                             </div>
@@ -418,6 +427,7 @@
                                             "
                                             >({{ t("onlyAppliesWhenStreamingEnabled") }})</span
                                         >
+                                        <EnvVarTooltip env-var="STREAMING_MODE" doc-section="other-config" />
                                     </span>
                                 </span>
                                 <span
@@ -447,7 +457,10 @@
                                         <path d="M6.5 16a3.5 3.5 0 0 1 0 -7h.5"></path>
                                         <path d="M5 9.3v-2.8a3.5 3.5 0 0 1 7 0v10"></path>
                                     </svg>
-                                    {{ t("forceThinking") }}
+                                    <span>
+                                        {{ t("forceThinking") }}
+                                        <EnvVarTooltip env-var="FORCE_THINKING" doc-section="other-config" />
+                                    </span>
                                 </span>
                                 <span
                                     class="value status-text-bold"
@@ -475,7 +488,10 @@
                                             d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
                                         ></path>
                                     </svg>
-                                    {{ t("forceWebSearch") }}
+                                    <span>
+                                        {{ t("forceWebSearch") }}
+                                        <EnvVarTooltip env-var="FORCE_WEB_SEARCH" doc-section="other-config" />
+                                    </span>
                                 </span>
                                 <span
                                     class="value status-text-bold"
@@ -500,7 +516,10 @@
                                         <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
                                         <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
                                     </svg>
-                                    {{ t("forceUrlContext") }}
+                                    <span>
+                                        {{ t("forceUrlContext") }}
+                                        <EnvVarTooltip env-var="FORCE_URL_CONTEXT" doc-section="other-config" />
+                                    </span>
                                 </span>
                                 <span
                                     class="value status-text-bold"
@@ -522,11 +541,47 @@
                                         stroke-linejoin="round"
                                         style="margin-right: 6px; vertical-align: middle"
                                     >
+                                        <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                                        <path d="M21 3v5h-5"></path>
+                                    </svg>
+                                    <span>
+                                        {{ t("maxRetries") }}
+                                        <span
+                                            style="
+                                                font-size: 0.8em;
+                                                color: var(--text-secondary);
+                                                font-weight: normal;
+                                                margin-left: 4px;
+                                            "
+                                            >({{ t("onlyAppliesWhenFakeStreaming") }})</span
+                                        >
+                                        <EnvVarTooltip env-var="MAX_RETRIES" doc-section="proxy-config" />
+                                    </span>
+                                </span>
+                                <span class="value">{{ state.maxRetries }}</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
                                         <path
                                             d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"
                                         ></path>
                                     </svg>
-                                    {{ t("apiKey") }}
+                                    <span>
+                                        {{ t("apiKey") }}
+                                        <EnvVarTooltip env-var="API_KEYS" doc-section="app-config" />
+                                    </span>
                                 </span>
                                 <span class="value status-text-bold">{{ apiKeySourceText }}</span>
                             </div>
@@ -960,7 +1015,10 @@
                                         <path d="m5 3 2 2"></path>
                                         <path d="m19 3-2 2"></path>
                                     </svg>
-                                    {{ t("latestVersion") }}
+                                    <span>
+                                        {{ t("latestVersion") }}
+                                        <EnvVarTooltip env-var="CHECK_UPDATE" doc-section="app-config" />
+                                    </span>
                                 </span>
                                 <span class="value">
                                     <span
@@ -1087,7 +1145,10 @@
                                         <line x1="3" y1="12" x2="3.01" y2="12"></line>
                                         <line x1="3" y1="18" x2="3.01" y2="18"></line>
                                     </svg>
-                                    {{ t("logLevel") }}
+                                    <span>
+                                        {{ t("logLevel") }}
+                                        <EnvVarTooltip env-var="LOG_LEVEL" doc-section="app-config" />
+                                    </span>
                                 </span>
                                 <el-select
                                     v-model="state.debugModeEnabled"
@@ -1485,6 +1546,7 @@ import JSZip from "jszip";
 import escapeHtml from "../utils/escapeHtml";
 import I18n from "../utils/i18n";
 import { useTheme } from "../utils/useTheme";
+import EnvVarTooltip from "../components/EnvVarTooltip.vue";
 
 const router = useRouter();
 const fileInput = ref(null);
@@ -1546,6 +1608,7 @@ const state = reactive({
     logs: t("loading"),
     logScrollTop: 0,
     maxContexts: 1,
+    maxRetries: 3,
     nextSwitchTimestamp: -1,
     releaseUrl: null,
     selectedAccounts: new Set(), // Selected account indices
@@ -2234,6 +2297,7 @@ const updateStatus = data => {
     state.accountDetails = data.status.accountDetails || [];
     state.activeContextsCount = data.status.activeContextsCount || 0;
     state.maxContexts = data.status.maxContexts ?? 1;
+    state.maxRetries = data.status.maxRetries ?? 3;
 
     const validIndices = new Set(state.accountDetails.map(acc => acc.index));
     for (const idx of state.selectedAccounts) {
@@ -2651,6 +2715,9 @@ onMounted(() => {
 
     // Check for updates once on initial load
     checkForUpdates();
+
+    // Expose copyText function globally for tooltip HTML content
+    window.__copyEnvVar = text => copyText(text);
 });
 
 onBeforeUnmount(() => {
@@ -2658,6 +2725,8 @@ onBeforeUnmount(() => {
     if (updateTimer) {
         clearTimeout(updateTimer);
     }
+    // Clean up global function
+    delete window.__copyEnvVar;
 });
 
 watchEffect(() => {

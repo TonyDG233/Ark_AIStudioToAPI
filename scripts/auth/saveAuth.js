@@ -137,36 +137,166 @@ const getNextAuthIndex = () => {
     const context = await browser.newContext(proxyConfig ? { proxy: proxyConfig } : {});
     const page = await context.newPage();
 
-    console.log("");
-    console.log(
-        getText(
-            "--- 请在新打开的 Camoufox 窗口中完成以下步骤 ---",
-            "--- Please complete the following steps in the newly opened Camoufox window ---"
-        )
-    );
-    console.log(
-        getText(
-            "1. 浏览器将打开 Google AI Studio。请在弹出的页面上完整登录您的 Google 账号。",
-            "1. The browser will open Google AI Studio. Please log in to your Google account completely on the popup page."
-        )
-    );
-    console.log(
-        getText(
-            "2. 登录成功并看到 AI Studio 界面后，请不要关闭浏览器窗口。",
-            "2. After successful login and seeing the AI Studio interface, do not close the browser window."
-        )
-    );
-    console.log(
-        getText(
-            '3. 返回此终端，然后按 "回车键" 继续...',
-            '3. Return to this terminal, then press "Enter" to continue...'
-        )
-    );
+    // Auto-fill logic
+    const autoFillEmail = process.env.AUTO_FILL_EMAIL;
+    const autoFillPwd = process.env.AUTO_FILL_PWD;
+
+    if (!autoFillEmail) {
+        console.log("");
+        console.log(
+            getText(
+                "--- 请在新打开的 Camoufox 窗口中完成以下步骤 ---",
+                "--- Please complete the following steps in the newly opened Camoufox window ---"
+            )
+        );
+        console.log(
+            getText(
+                "1. 浏览器将打开 Google AI Studio。请在弹出的页面上完整登录您的 Google 账号。",
+                "1. The browser will open Google AI Studio. Please log in to your Google account completely on the popup page."
+            )
+        );
+        console.log(
+            getText(
+                "2. 登录成功并看到 AI Studio 界面后，请不要关闭浏览器窗口。",
+                "2. After successful login and seeing the AI Studio interface, do not close the browser window."
+            )
+        );
+        console.log(
+            getText(
+                '3. 返回此终端，然后按 "回车键" 继续...',
+                '3. Return to this terminal, then press "Enter" to continue...'
+            )
+        );
+    }
 
     // <<< This is the only modification point: updated to Google AI Studio address >>>
     await page.goto("https://aistudio.google.com/u/0/prompts/new_chat");
 
-    await new Promise(resolve => process.stdin.once("data", resolve));
+    if (autoFillEmail) {
+        try {
+            const randomWait = () => new Promise(r => setTimeout(r, 1000 + Math.random() * 4000));
+
+            console.log(
+                getText(
+                    `🕵️ 正在尝试自动填入账号: ${autoFillEmail}`,
+                    `🕵️ Attempting to auto-fill account: ${autoFillEmail}`
+                )
+            );
+            await page.waitForSelector('input[type="email"]', { timeout: 30000 });
+            await randomWait();
+            await page.fill('input[type="email"]', autoFillEmail);
+            await page.keyboard.press("Enter");
+
+            if (autoFillPwd) {
+                console.log(getText("🕵️ 正在等待密码输入框...", "🕵️ Waiting for password input field..."));
+                await page.waitForSelector('input[type="password"]', { state: "visible", timeout: 30000 });
+                await randomWait();
+                await page.fill('input[type="password"]', autoFillPwd);
+                await page.keyboard.press("Enter");
+
+                // Handle post-login / 2FA transition pages (e.g. "You're all set" screen with a Next button)
+                try {
+                    // Look for the specific Google transition button
+                    const nextButton = page.locator(
+                        'button:has(span:text("Next")), button:has(span:text("下一步")), button:has-text("Next"), button:has-text("下一步")'
+                    );
+                    const notNowButton = page.locator(
+                        'button:has(span:text("Not now")), button:has(span:text("暂时不")), button:has-text("Not now"), button:has-text("暂时不")'
+                    );
+
+                    // Polling for the transition button for a short duration
+                    for (let i = 0; i < 10; i++) {
+                        if (await nextButton.isVisible({ timeout: 1000 })) {
+                            console.log(
+                                getText(
+                                    "🕵️ 检测到「下一步」按钮，正在点击以跳过说明页...",
+                                    "🕵️ Detected 'Next' button, clicking to skip info page..."
+                                )
+                            );
+                            await nextButton.click();
+                            await randomWait();
+                        } else if (await notNowButton.isVisible({ timeout: 1000 })) {
+                            console.log(
+                                getText(
+                                    "🕵️ 检测到「暂时不」按钮，正在点击以跳过...",
+                                    "🕵️ Detected 'Not now' button, clicking to skip..."
+                                )
+                            );
+                            await notNowButton.click();
+                            await randomWait();
+                        }
+                        const title = await page.title();
+                        if (title.includes("AI Studio")) break;
+                        await page.waitForTimeout(1000);
+                    }
+                } catch (e) {
+                    // Best effort
+                }
+            }
+            console.log(
+                getText(
+                    "🕵️ 自动填充已完成。如有 2FA 请在浏览器中手动完成。",
+                    "🕵️ Auto-fill complete. Please complete 2FA manually if required."
+                )
+            );
+        } catch (e) {
+            console.warn(
+                getText(
+                    `⚠️ 自动填充提示: 未能完全自动执行 (${e.message})`,
+                    `⚠️ Auto-fill notice: Could not complete automatically (${e.message})`
+                )
+            );
+        }
+    }
+
+    console.log("");
+    console.log(
+        getText(
+            "🕵️ 正在监测登录状态 (监测 AI Studio 标题)...",
+            "🕵️ Monitoring login status (watching for AI Studio title)..."
+        )
+    );
+
+    // Monitoring loop for AI Studio title
+    let loginDetected = false;
+    const checkInterval = 1000;
+    const maxWaitTime = 300000; // 5 minutes
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitTime) {
+        try {
+            const title = await page.title();
+            if (title.includes("AI Studio")) {
+                console.log(
+                    getText("✨ 检测到 AI Studio 标题，登录成功！", "✨ AI Studio title detected, login successful!")
+                );
+                await page.waitForTimeout(2000); // Wait 2s for state to stabilize
+                loginDetected = true;
+                break;
+            }
+        } catch (e) {
+            // Page might be navigating
+        }
+        await page.waitForTimeout(checkInterval);
+    }
+
+    if (!loginDetected) {
+        if (autoFillEmail) {
+            console.log(
+                getText(
+                    "⚠️ 未能自动检测到登录成功状态。请在浏览器中手动完成登录。",
+                    "⚠️ Could not automatically detect login success. Please complete login manually in the browser."
+                )
+            );
+        }
+        console.log(
+            getText(
+                '▶️  返回此终端，然后按 "回车键" 继续...',
+                '▶️  Return to this terminal, then press "Enter" to continue...'
+            )
+        );
+        await new Promise(resolve => process.stdin.once("data", resolve));
+    }
 
     // ==================== Capture Account Name ====================
 

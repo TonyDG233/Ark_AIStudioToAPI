@@ -258,9 +258,21 @@ This endpoint forwards requests to the official Gemini API format endpoint.
 | `FORCE_URL_CONTEXT`        | Force enable URL context for all requests.                                                                                 | `false`       |
 | `CAMOUFOX_EXECUTABLE_PATH` | Path to the Camoufox browser executable (supports both absolute and relative paths). Only required if manually downloaded. | Auto-detected |
 
+### ⚡ Account Auto-fill
+
+To simplify the login process for multiple accounts, you can configure the `users.csv` file for auto-fill:
+
+1. Create `users.csv` in the project root.
+2. Format: `email,password` (one per line).
+3. Run `npm run setup-auth` and select the account when prompted.
+
+> 📖 For detailed configuration instructions, see: [Account Auto-fill Guide](docs/en/auto-fill-guide.md)
+
 ### 🧠 Model List Configuration
 
 Edit `configs/models.json` to customize available models and their settings.
+
+> 💡 **Tip:** The thinking parameter reserves the function to be set via the model suffix. It supports setting the thinking level by appending `-THINKING_LEVEL` or `(THINKING_LEVEL)` to the model name (`THINKING_LEVEL` supports `high`, `low`, `medium`, `minimal`, case-insensitive). For example: `gemini-3-flash-preview(minimal)` or `gemini-3-flash-preview-minimal`.
 
 ## 📄 License
 
