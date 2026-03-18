@@ -74,6 +74,42 @@ curl -X POST http://localhost:7860/v1/chat/completions \
   }'
 ```
 
+### 💬 Responses API
+
+```bash
+curl -X POST http://localhost:7860/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key-1" \
+  -d '{
+    "model": "gemini-2.5-flash-lite",
+    "input": "Summarize the main idea of functional programming in 3 sentences.",
+    "stream": false
+  }'
+```
+
+#### 🌊 Streaming Responses API
+
+```bash
+curl -X POST http://localhost:7860/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key-1" \
+  -d '{
+    "model": "gemini-2.5-flash-lite",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Write a short poem about autumn."
+          }
+        ]
+      }
+    ],
+    "stream": true
+  }'
+```
+
 ## ♊ Gemini Native API Format
 
 ```bash

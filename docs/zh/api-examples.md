@@ -74,6 +74,42 @@ curl -X POST http://localhost:7860/v1/chat/completions \
   }'
 ```
 
+### 💬 Responses API
+
+```bash
+curl -X POST http://localhost:7860/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key-1" \
+  -d '{
+    "model": "gemini-2.5-flash-lite",
+    "input": "请用三句话总结函数式编程的核心思想。",
+    "stream": false
+  }'
+```
+
+#### 🌊 流式 Responses API
+
+```bash
+curl -X POST http://localhost:7860/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key-1" \
+  -d '{
+    "model": "gemini-2.5-flash-lite",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "写一首关于秋天的短诗。"
+          }
+        ]
+      }
+    ],
+    "stream": true
+  }'
+```
+
 ## ♊ Gemini 原生 API 格式
 
 ```bash
