@@ -177,11 +177,10 @@ Deploy directly on Claw Cloud Run, a fully managed container platform.
 
 ### 🦓 Zeabur Deployment
 
-Deploy on the Zeabur container platform.
+> ℹ **Zeabur announcement:** Since **March 15, 2026**, Zeabur has stopped allowing new projects to be created on the **Shared Cluster**. **Services already running on the Shared Cluster are not affected.** See the official changelog for details:
+> [Announcement](https://zeabur.com/changelogs/phasing-out-shared-cluster)
 
-> ⚠ **Note:** Zeabur's free tier provides only $5 credits per month, which is not enough to run 24/7. Please pause the service when not in use!
-
-> 📖 For detailed deployment instructions, see: [Deploy on Zeabur](docs/en/zeabur.md)
+> 📖 For the legacy deployment guide, see: [Deploy on Zeabur](docs/en/zeabur.md)
 
 ## 📡 API Usage
 

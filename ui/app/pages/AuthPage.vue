@@ -267,9 +267,21 @@ const textInputRef = ref(null);
 // Initialize theme
 useTheme();
 
-const t = key => {
+const t = (key, options) => {
     langVersion.value; // Access to track language changes
-    return I18n.t(key, key);
+    return I18n.t(key, options);
+};
+
+const getApiErrorMessage = data => {
+    if (data?.message) {
+        return t(data.message, data);
+    }
+
+    if (data?.error) {
+        return typeof data.error === "string" ? data.error : data.error.message;
+    }
+
+    return null;
 };
 
 const statusTitleText = computed(() => {
@@ -400,10 +412,10 @@ const loadVncClient = async (vncContainer, vncSurface) => {
         }
 
         if (!response.ok) {
-            throw new Error(data.error || `Server responded with ${response.status}`);
+            throw new Error(getApiErrorMessage(data) || `Server responded with ${response.status}`);
         }
         if (data.error) {
-            throw new Error(data.error);
+            throw new Error(getApiErrorMessage(data) || data.error);
         }
 
         vncSurface.innerHTML = "";
@@ -542,7 +554,7 @@ const saveAuth = async (accountName = null) => {
             return;
         }
 
-        ElMessage.error(t("authSaveFailed").replace("{error}", data.error || "Unknown error."));
+        ElMessage.error(t("authSaveFailed").replace("{error}", getApiErrorMessage(data) || "Unknown error."));
     } catch (error) {
         console.error("Error saving auth file:", error);
         ElMessage.error(t("authSaveError").replace("{error}", error.message || error));

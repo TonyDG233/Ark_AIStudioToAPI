@@ -2,8 +2,13 @@
 
 This guide will help you deploy the `aistudio-to-api` service on [Zeabur](https://zeabur.com/).
 
+> [!IMPORTANT]
+> **Notice: Since March 15, 2026, Zeabur no longer allows new projects to be created on the Shared Cluster, so this free setup path is no longer available for new deployments. The instructions below are kept as a legacy reference.**
+>
+> Official changelog: https://zeabur.com/changelogs/phasing-out-shared-cluster
+
 > [!CAUTION]
-> **Zeabur's free tier provides only $5 credits per month, which is not enough to run the service 24/7. Please make sure to pause the service when not in use!**
+> **The free-tier note below is part of the legacy tutorial context: Zeabur's free tier provides only $5 credits per month, which is not enough to run the service 24/7. Please make sure to pause the service when not in use!**
 
 ## 📦 Deployment Steps
 

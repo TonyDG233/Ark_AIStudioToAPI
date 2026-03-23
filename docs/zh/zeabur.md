@@ -2,8 +2,13 @@
 
 本指南将帮助你在 [Zeabur](https://zeabur.com/) 上部署 `aistudio-to-api` 服务。
 
+> [!IMPORTANT]
+> **说明：自 2026/03/15 起，Zeabur 已停止在共享集群上创建新项目，因此目前已无法按本教程免费新建共享集群项目。以下内容为旧版部署教程，仅供参考。**
+>
+> 官方说明：https://zeabur.com/zh-CN/changelogs/phasing-out-shared-cluster
+
 > [!CAUTION]
-> **Zeabur 的免费额度每个月赠金 5 美元，不足以支持 24 小时运行。因此，不用的时候请务必暂停服务！**
+> **以下免费额度说明属于旧版教程背景信息：Zeabur 的免费额度每个月赠金 5 美元，不足以支持 24 小时运行。因此，不用的时候请务必暂停服务！**
 
 ## 📦 部署步骤
 

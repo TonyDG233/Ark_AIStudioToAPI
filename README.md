@@ -179,11 +179,10 @@ sudo docker compose down
 
 ### 🦓 Zeabur 部署
 
-支持部署到 Zeabur 容器平台。
+> ℹ **Zeabur 公告：** 自 **2026/03/15** 起，Zeabur 已停止在 **共享集群** 上创建新项目；**已经运行在共享集群上的服务不会受到影响**。详情请参阅官方变更说明：
+> [公告](https://zeabur.com/zh-CN/changelogs/phasing-out-shared-cluster)
 
-> ⚠ **注意：** Zeabur 的免费额度每月仅 5 美元，不足以支持 24 小时运行。不使用时请务必暂停服务！
-
-> 📖 详细部署说明请参阅：[部署到 Zeabur](docs/zh/zeabur.md)
+> 📖 旧版部署教程请参阅：[部署到 Zeabur](docs/zh/zeabur.md)
 
 ## 📡 使用 API
 

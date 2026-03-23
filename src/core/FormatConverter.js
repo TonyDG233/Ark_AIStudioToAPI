@@ -15,6 +15,18 @@ const mime = require("mime-types");
 class FormatConverter {
     // Placeholder signature for Gemini 3 functionCall validation
     static DUMMY_THOUGHT_SIGNATURE = "context_engineering_is_the_way_to_go";
+    static GEMINI_BUILT_IN_TOOL_KEYS = [
+        "codeExecution",
+        "code_execution",
+        "googleMaps",
+        "google_maps",
+        "googleSearch",
+        "google_search",
+        "googleSearchRetrieval",
+        "google_search_retrieval",
+        "urlContext",
+        "url_context",
+    ];
 
     // ThinkingLevel suffix mapping (lowercase -> uppercase API value)
     static THINKING_LEVEL_MAP = {
@@ -118,6 +130,60 @@ class FormatConverter {
                 // Note: functionResponse does NOT need thoughtSignature per official docs
             }
         }
+
+        return geminiBody;
+    }
+
+    hasGeminiBuiltInTools(geminiBody) {
+        return !!(
+            geminiBody &&
+            Array.isArray(geminiBody.tools) &&
+            geminiBody.tools.some(
+                tool =>
+                    tool &&
+                    typeof tool === "object" &&
+                    FormatConverter.GEMINI_BUILT_IN_TOOL_KEYS.some(toolKey =>
+                        Object.prototype.hasOwnProperty.call(tool, toolKey)
+                    )
+            )
+        );
+    }
+
+    hasGeminiFunctionDeclarations(geminiBody) {
+        return !!(
+            geminiBody &&
+            Array.isArray(geminiBody.tools) &&
+            geminiBody.tools.some(
+                tool =>
+                    tool &&
+                    typeof tool === "object" &&
+                    ((Array.isArray(tool.functionDeclarations) && tool.functionDeclarations.length > 0) ||
+                        (Array.isArray(tool.function_declarations) && tool.function_declarations.length > 0))
+            )
+        );
+    }
+
+    ensureServerSideToolInvocations(geminiBody, logPrefix = "[Adapter]") {
+        if (!this.hasGeminiBuiltInTools(geminiBody) || !this.hasGeminiFunctionDeclarations(geminiBody)) {
+            return geminiBody;
+        }
+
+        if (
+            !geminiBody.toolConfig ||
+            typeof geminiBody.toolConfig !== "object" ||
+            Array.isArray(geminiBody.toolConfig)
+        ) {
+            geminiBody.toolConfig = {};
+        }
+
+        if (geminiBody.toolConfig.includeServerSideToolInvocations === true) {
+            return geminiBody;
+        }
+
+        geminiBody.toolConfig.includeServerSideToolInvocations = true;
+        this.logger.debug(
+            `${logPrefix} Enabled toolConfig.includeServerSideToolInvocations for built-in tools with functionDeclarations.`
+        );
 
         return geminiBody;
     }
@@ -818,6 +884,8 @@ class FormatConverter {
                 this.logger.info(`[Adapter] ⚠️ Force features enabled, injecting tools: [${toolsToAdd.join(", ")}]`);
             }
         }
+
+        this.ensureServerSideToolInvocations(googleRequest);
 
         // Safety settings
         googleRequest.safetySettings = [

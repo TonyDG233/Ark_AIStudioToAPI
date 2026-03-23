@@ -24,6 +24,17 @@ class StatusRoutes {
         this.versionChecker = new VersionChecker(this.logger);
     }
 
+    _rejectIfSystemBusy(res) {
+        if (!this.serverSystem.requestHandler?.isSystemBusy) {
+            return false;
+        }
+
+        return res.status(409).json({
+            error: "System is busy switching or recovering accounts. Please try again later.",
+            message: "systemBusySwitchingOrRecoveringAccounts",
+        });
+    }
+
     /**
      * Setup status and management routes
      */
@@ -159,6 +170,8 @@ class StatusRoutes {
 
         app.put("/api/accounts/current", isAuthenticated, async (req, res) => {
             try {
+                if (this._rejectIfSystemBusy(res)) return;
+
                 const { targetIndex } = req.body;
                 if (targetIndex !== undefined && targetIndex !== null) {
                     this.logger.info(`[WebUI] Received request to switch to specific account #${targetIndex}...`);
@@ -189,6 +202,8 @@ class StatusRoutes {
 
         app.post("/api/accounts/deduplicate", isAuthenticated, async (req, res) => {
             try {
+                if (this._rejectIfSystemBusy(res)) return;
+
                 const { authSource, requestHandler } = this.serverSystem;
 
                 const duplicateGroups = authSource.getDuplicateGroups() || [];
@@ -299,6 +314,8 @@ class StatusRoutes {
 
         // Batch delete accounts - Must be defined before /api/accounts/:index to avoid index matching "batch"
         app.delete("/api/accounts/batch", isAuthenticated, async (req, res) => {
+            if (this._rejectIfSystemBusy(res)) return;
+
             const { indices, force } = req.body;
             const currentAuthIndex = this.serverSystem.requestHandler.currentAuthIndex;
 
@@ -522,6 +539,8 @@ class StatusRoutes {
         });
 
         app.delete("/api/accounts/:index", isAuthenticated, async (req, res) => {
+            if (this._rejectIfSystemBusy(res)) return;
+
             const rawIndex = req.params.index;
             const targetIndex = Number(rawIndex);
             const currentAuthIndex = this.serverSystem.requestHandler.currentAuthIndex;
@@ -676,6 +695,8 @@ class StatusRoutes {
         });
 
         app.post("/api/files", isAuthenticated, async (req, res) => {
+            if (this._rejectIfSystemBusy(res)) return;
+
             const { content } = req.body;
             // Ignore req.body.filename - auto rename
 
@@ -727,6 +748,8 @@ class StatusRoutes {
 
         // Batch upload files
         app.post("/api/files/batch", isAuthenticated, async (req, res) => {
+            if (this._rejectIfSystemBusy(res)) return;
+
             const { files } = req.body;
 
             if (!Array.isArray(files) || files.length === 0) {
