@@ -33,7 +33,7 @@ A tool that wraps Google AI Studio web interface to provide OpenAI API, Gemini A
    This script will:
    - Automatically download the Camoufox browser (a privacy-focused Firefox fork)
    - Launch the browser and navigate to AI Studio automatically
-   - Save your authentication credentials locally
+   - Save your authentication credentials locally (auth files are stored in `/configs/auth`)
 
    > 💡 **Tip:** If downloading the Camoufox browser fails or takes too long, you can manually download it from [here](https://github.com/daijro/camoufox/releases/tag/v135.0.1-beta.24), and set the environment variable `CAMOUFOX_EXECUTABLE_PATH` to the path of the browser executable (both absolute and relative paths are supported).
 
@@ -51,6 +51,13 @@ A tool that wraps Google AI Studio web interface to provide OpenAI API, Gemini A
 
    After the service starts, you can access `http://localhost:7860` in your browser to open the web console homepage, where you can view account status and service status.
 
+5. Update to the latest version (for existing local deployments):
+
+   ```bash
+   git pull
+   npm install
+   ```
+
 > ⚠ **Note:** Running directly does not support adding accounts via VNC online. You need to use the `npm run setup-auth` script to add accounts. VNC login is only available in Docker deployments.
 
 ### 🐋 Docker Deployment
@@ -67,7 +74,7 @@ docker run -d \
   -p 7860:7860 \
   -v /path/to/auth:/app/configs/auth \
   -e API_KEYS=your-api-key-1,your-api-key-2 \
-  -e TZ=Asia/Shanghai \
+  -e TZ=America/New_York \
   --restart unless-stopped \
   ghcr.io/ibuhub/aistudio-to-api:latest
 ```
@@ -79,7 +86,7 @@ Parameters:
 - `-p 7860:7860`: API server port (if using a reverse proxy, strongly consider `127.0.0.1:7860`)
 - `-v /path/to/auth:/app/configs/auth`: Mount directory containing auth files
 - `-e API_KEYS`: Comma-separated list of API keys for authentication
-- `-e TZ=Asia/Shanghai`: Timezone for logs (optional, defaults to system timezone)
+- `-e TZ=America/New_York`: Timezone for logs (optional, defaults to system timezone)
 
 ##### 📦 Option 2: Docker Compose
 
@@ -93,31 +100,17 @@ services:
     image: ghcr.io/ibuhub/aistudio-to-api:latest
     container_name: aistudio-to-api
     ports:
+      # API server port (if using a reverse proxy, strongly consider `127.0.0.1:7860`)
       - 7860:7860
     restart: unless-stopped
     volumes:
+      # Mount directory containing auth files
       - ./auth:/app/configs/auth
     environment:
+      # Comma-separated list of API keys for authentication
       API_KEYS: your-api-key-1,your-api-key-2
-      TZ: Asia/Shanghai # Timezone for logs (optional)
-```
-
-Start the service:
-
-```bash
-sudo docker compose up -d
-```
-
-View logs:
-
-```bash
-sudo docker compose logs -f
-```
-
-Stop the service:
-
-```bash
-sudo docker compose down
+      # Timezone setting (optional, defaults to system timezone)
+      TZ: America/New_York
 ```
 
 ##### 🛠️ Option 3: Build from Source
@@ -138,7 +131,7 @@ If you prefer to build the Docker image yourself, you can use the following comm
      -p 7860:7860 \
      -v /path/to/auth:/app/configs/auth \
      -e API_KEYS=your-api-key-1,your-api-key-2 \
-     -e TZ=Asia/Shanghai \
+     -e TZ=America/New_York \
      --restart unless-stopped \
      aistudio-to-api
    ```
@@ -232,6 +225,7 @@ This endpoint forwards requests to the official Gemini API format endpoint.
 | `RATE_LIMIT_WINDOW_MINUTES` | Time window for rate limiting in minutes.                                                                                                                                   | `15`                 |
 | `CHECK_UPDATE`              | Enable version update check on page load (`false` to disable).                                                                                                              | `true`               |
 | `LOG_LEVEL`                 | Logging output level. Set to `DEBUG` for detailed debug logs.                                                                                                               | `INFO`               |
+| `TZ`                        | Timezone used for logs and displayed times, for example `America/New_York`. Defaults to the system timezone when empty.                                                     | System timezone      |
 
 #### 🌐 Proxy Configuration
 
@@ -274,6 +268,8 @@ To simplify the login process for multiple accounts, you can configure the `user
 Edit `configs/models.json` to customize available models and their settings.
 
 > 💡 **Tip:** The thinking parameter reserves the function to be set via the model suffix. It supports setting the thinking level by appending `-THINKING_LEVEL` or `(THINKING_LEVEL)` to the model name (`THINKING_LEVEL` supports `high`, `low`, `medium`, `minimal`, case-insensitive). For example: `gemini-3-flash-preview(minimal)` or `gemini-3-flash-preview-minimal`.
+>
+> Streaming mode can also be overridden by appending `-real` or `-fake` to the end of the model name. This override has higher priority than the system streaming mode, but it only takes effect for streaming requests. For example: `gemini-3-flash-preview-fake`. When used together, the streaming suffix must be last, for example: `gemini-3-flash-preview-minimal-fake` or `gemini-3-flash-preview(minimal)-real`.
 
 ## 📄 License
 

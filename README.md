@@ -33,7 +33,7 @@
    该脚本将：
    - 自动下载 Camoufox 浏览器（一个注重隐私的 Firefox 分支）
    - 启动浏览器并自动导航到 AI Studio
-   - 在本地保存您的身份验证凭据
+   - 在本地保存您的身份验证凭据（auth 文件位于 `/configs/auth`）
 
    > 💡 **提示：** 如果下载 Camoufox 浏览器失败或等待太久，可以自行点击 [此处](https://github.com/daijro/camoufox/releases/tag/v135.0.1-beta.24) 下载，然后设置环境变量 `CAMOUFOX_EXECUTABLE_PATH` 为可执行文件的路径（支持绝对和相对路径）。
 
@@ -50,6 +50,13 @@
    API 服务将在 `http://localhost:7860` 上运行。
 
    服务启动后，您可以在浏览器中访问 `http://localhost:7860` 打开 Web 控制台主页，在这里可以查看账号状态和服务状态。
+
+5. 更新到最新版本（已有本地部署时）：
+
+   ```bash
+   git pull
+   npm install
+   ```
 
 > ⚠ **注意：** 直接运行不支持通过 VNC 在线添加账号，需要使用 `npm run setup-auth` 脚本添加账号。当前 VNC 登录功能仅在 Docker 容器中可用。
 
@@ -93,34 +100,20 @@ services:
     image: ghcr.io/ibuhub/aistudio-to-api:latest
     container_name: aistudio-to-api
     ports:
+      # API 服务器端口（如果使用反向代理，强烈建议改成 127.0.0.1:7860）
       - 7860:7860
     restart: unless-stopped
     volumes:
+      # 挂载包含认证文件的目录
       - ./auth:/app/configs/auth
     environment:
+      # 用于身份验证的 API 密钥列表（使用逗号分隔）
       API_KEYS: your-api-key-1,your-api-key-2
-      TZ: Asia/Shanghai # 日志时区设置（可选）
+      # 时区设置（可选，默认使用系统时区）
+      TZ: Asia/Shanghai
 ```
 
 > 💡 **提示：** 如果 `ghcr.io` 访问速度较慢或不可用，可以将 `image` 改为 `ibuhub/aistudio-to-api:latest`。
-
-启动服务：
-
-```bash
-sudo docker compose up -d
-```
-
-查看日志：
-
-```bash
-sudo docker compose logs -f
-```
-
-停止服务：
-
-```bash
-sudo docker compose down
-```
 
 ##### 🛠️ 方式 3：从源码构建
 
@@ -234,6 +227,7 @@ sudo docker compose down
 | `RATE_LIMIT_WINDOW_MINUTES` | 速率限制的时间窗口长度（分钟）。                                                                                               | `15`                 |
 | `CHECK_UPDATE`              | 是否在页面加载时检查版本更新（设为 `false` 禁用）。                                                                            | `true`               |
 | `LOG_LEVEL`                 | 日志输出等级。设为 `DEBUG` 启用详细调试日志。                                                                                  | `INFO`               |
+| `TZ`                        | 日志和显示时间使用的时区，例如 `Asia/Shanghai`。留空时默认使用系统时区。                                                       | 系统时区             |
 
 #### 🌐 代理配置
 
@@ -276,6 +270,8 @@ sudo docker compose down
 编辑 `configs/models.json` 以自定义可用模型及其设置。
 
 > 💡 **提示：** 思考参数预留了通过模型后缀名来设置的功能，支持在模型名后面通过 `-THINKING_LEVEL` 或 `(THINKING_LEVEL)` 来设置（`THINKING_LEVEL` 支持 `high`、`low`、`medium`、`minimal`，不区分大小写）。例如：`gemini-3-flash-preview(minimal)` 或 `gemini-3-flash-preview-minimal`。
+>
+> 真假流式也支持通过模型名后缀覆盖，支持在模型名最后追加 `-real` 或 `-fake`。该后缀优先级高于系统的真假流式，但只会在流式请求中生效。例如：`gemini-3-flash-preview-fake`。若和思考后缀同时使用，真假流后缀必须放在最后，例如：`gemini-3-flash-preview-minimal-fake` 或 `gemini-3-flash-preview(minimal)-real`。
 
 ## 📄 许可证
 
