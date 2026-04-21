@@ -50,6 +50,7 @@ A tool that wraps Google AI Studio web interface to provide OpenAI API, Gemini A
    The API server will be available at `http://localhost:7860`
 
    After the service starts, you can access `http://localhost:7860` in your browser to open the web console homepage, where you can view account status and service status.
+   Request usage statistics are persisted locally at `/data/usage-stats.jsonl`.
 
 5. Update to the latest version (for existing local deployments):
 
@@ -73,6 +74,7 @@ docker run -d \
   --name aistudio-to-api \
   -p 7860:7860 \
   -v /path/to/auth:/app/configs/auth \
+  -v /path/to/data:/app/data \
   -e API_KEYS=your-api-key-1,your-api-key-2 \
   -e TZ=America/New_York \
   --restart unless-stopped \
@@ -85,6 +87,7 @@ Parameters:
 
 - `-p 7860:7860`: API server port (if using a reverse proxy, strongly consider `127.0.0.1:7860`)
 - `-v /path/to/auth:/app/configs/auth`: Mount directory containing auth files
+- `-v /path/to/data:/app/data`: Mount persistent data directory for usage statistics (`/app/data/usage-stats.jsonl`)
 - `-e API_KEYS`: Comma-separated list of API keys for authentication
 - `-e TZ=America/New_York`: Timezone for logs (optional, defaults to system timezone)
 
@@ -106,6 +109,8 @@ services:
     volumes:
       # Mount directory containing auth files
       - ./auth:/app/configs/auth
+      # Mount persistent data directory for usage statistics
+      - ./data:/app/data
     environment:
       # Comma-separated list of API keys for authentication
       API_KEYS: your-api-key-1,your-api-key-2
@@ -130,6 +135,7 @@ If you prefer to build the Docker image yourself, you can use the following comm
      --name aistudio-to-api \
      -p 7860:7860 \
      -v /path/to/auth:/app/configs/auth \
+     -v /path/to/data:/app/data \
      -e API_KEYS=your-api-key-1,your-api-key-2 \
      -e TZ=America/New_York \
      --restart unless-stopped \
@@ -245,13 +251,15 @@ This endpoint forwards requests to the official Gemini API format endpoint.
 
 #### 🗒️ Other Configuration
 
-| Variable                   | Description                                                                                                                | Default       |
-| :------------------------- | :------------------------------------------------------------------------------------------------------------------------- | :------------ |
-| `STREAMING_MODE`           | Streaming mode. `real` for real streaming, `fake` for fake streaming.                                                      | `real`        |
-| `FORCE_THINKING`           | Force enable thinking mode for all requests.                                                                               | `false`       |
-| `FORCE_WEB_SEARCH`         | Force enable web search for all requests.                                                                                  | `false`       |
-| `FORCE_URL_CONTEXT`        | Force enable URL context for all requests.                                                                                 | `false`       |
-| `CAMOUFOX_EXECUTABLE_PATH` | Path to the Camoufox browser executable (supports both absolute and relative paths). Only required if manually downloaded. | Auto-detected |
+| Variable                    | Description                                                                                                                                                                           | Default       |
+| :-------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :------------ |
+| `STREAMING_MODE`            | Streaming mode. `real` for real streaming, `fake` for fake streaming.                                                                                                                 | `real`        |
+| `ENABLE_USAGE_STATS`        | Whether to enable request usage statistics. Defaults to enabled. Set to `false` to skip loading local stats, skip writing stats, and make `/api/usage-stats` return an empty payload. | `true`        |
+| `SAFETY_SETTINGS_THRESHOLD` | Safety settings level. Official docs: [Safety settings](https://ai.google.dev/gemini-api/docs/safety-settings)                                                                        | `OFF`         |
+| `FORCE_THINKING`            | Force enable thinking mode for all requests.                                                                                                                                          | `false`       |
+| `FORCE_WEB_SEARCH`          | Force enable web search for all requests.                                                                                                                                             | `false`       |
+| `FORCE_URL_CONTEXT`         | Force enable URL context for all requests.                                                                                                                                            | `false`       |
+| `CAMOUFOX_EXECUTABLE_PATH`  | Path to the Camoufox browser executable (supports both absolute and relative paths). Only required if manually downloaded.                                                            | Auto-detected |
 
 ### ⚡ Account Auto-fill
 
@@ -269,7 +277,9 @@ Edit `configs/models.json` to customize available models and their settings.
 
 > 💡 **Tip:** The thinking parameter reserves the function to be set via the model suffix. It supports setting the thinking level by appending `-THINKING_LEVEL` or `(THINKING_LEVEL)` to the model name (`THINKING_LEVEL` supports `high`, `low`, `medium`, `minimal`, case-insensitive). For example: `gemini-3-flash-preview(minimal)` or `gemini-3-flash-preview-minimal`.
 >
-> Streaming mode can also be overridden by appending `-real` or `-fake` to the end of the model name. This override has higher priority than the system streaming mode, but it only takes effect for streaming requests. For example: `gemini-3-flash-preview-fake`. When used together, the streaming suffix must be last, for example: `gemini-3-flash-preview-minimal-fake` or `gemini-3-flash-preview(minimal)-real`.
+> Streaming mode can also be overridden with `-real` or `-fake`. This override has higher priority than the system streaming mode, but it only takes effect for streaming requests. For example: `gemini-3-flash-preview-fake`. When used together with a thinking suffix, the streaming suffix should come after the thinking suffix, for example: `gemini-3-flash-preview-minimal-fake` or `gemini-3-flash-preview(minimal)-real`.
+>
+> Web search can also be forced on by appending `-search` to the end of the model name. For example: `gemini-3-flash-preview-search`. When combined with other suffixes, `-search` must be the final suffix; the full combined order remains `thinking -> streaming -> search`, for example: `gemini-3-flash-preview-minimal-search`, `gemini-3-flash-preview-real-search`, or `gemini-3-flash-preview(minimal)-fake-search`.
 
 ## 📄 License
 

@@ -24,8 +24,10 @@ class ConfigLoader {
             apiKeySource: "Not set",
             autoSwitchIntervalHours: 3,
             browserExecutablePath: null,
+            checkUpdate: true,
             enableAuthUpdate: true,
             enableAutoSwitch: false,
+            enableUsageStats: true,
             failureThreshold: 3,
             forceThinking: false,
             forceUrlContext: false,
@@ -36,6 +38,7 @@ class ConfigLoader {
             maxContexts: 1,
             maxRetries: 3,
             retryDelay: 2000,
+            safetySettingsThreshold: "OFF",
             streamingMode: "real",
             switchOnUses: 40,
             wsPort: 9998,
@@ -80,10 +83,29 @@ class ConfigLoader {
         if (process.env.API_KEYS) {
             config.apiKeys = process.env.API_KEYS.split(",");
         }
+        if (process.env.CHECK_UPDATE) config.checkUpdate = process.env.CHECK_UPDATE.toLowerCase() !== "false";
         if (process.env.FORCE_THINKING) config.forceThinking = process.env.FORCE_THINKING.toLowerCase() === "true";
         if (process.env.FORCE_WEB_SEARCH) config.forceWebSearch = process.env.FORCE_WEB_SEARCH.toLowerCase() === "true";
         if (process.env.FORCE_URL_CONTEXT)
             config.forceUrlContext = process.env.FORCE_URL_CONTEXT.toLowerCase() === "true";
+        if (process.env.SAFETY_SETTINGS_THRESHOLD) {
+            const rawThreshold = String(process.env.SAFETY_SETTINGS_THRESHOLD).trim().toUpperCase();
+            const allowedThresholds = new Set([
+                "HARM_BLOCK_THRESHOLD_UNSPECIFIED",
+                "BLOCK_LOW_AND_ABOVE",
+                "BLOCK_MEDIUM_AND_ABOVE",
+                "BLOCK_ONLY_HIGH",
+                "BLOCK_NONE",
+                "OFF",
+            ]);
+            if (allowedThresholds.has(rawThreshold)) {
+                config.safetySettingsThreshold = rawThreshold;
+            } else {
+                this.logger.warn(
+                    `[Config] Invalid SAFETY_SETTINGS_THRESHOLD "${process.env.SAFETY_SETTINGS_THRESHOLD}", falling back to ${config.safetySettingsThreshold}.`
+                );
+            }
+        }
         if (process.env.ENABLE_AUTH_UPDATE)
             config.enableAuthUpdate = process.env.ENABLE_AUTH_UPDATE.toLowerCase() !== "false";
         if (process.env.ENABLE_AUTO_SWITCH)
@@ -91,6 +113,8 @@ class ConfigLoader {
         if (process.env.AUTO_SWITCH_INTERVAL_HOURS)
             config.autoSwitchIntervalHours =
                 Math.max(0.1, parseFloat(process.env.AUTO_SWITCH_INTERVAL_HOURS)) || config.autoSwitchIntervalHours;
+        if (process.env.ENABLE_USAGE_STATS)
+            config.enableUsageStats = process.env.ENABLE_USAGE_STATS.toLowerCase() !== "false";
 
         let rawCodes = process.env.IMMEDIATE_SWITCH_STATUS_CODES;
         let codesSource = "environment variable";
@@ -167,7 +191,10 @@ class ConfigLoader {
         this.logger.info(`  Force Thinking: ${config.forceThinking}`);
         this.logger.info(`  Force Web Search: ${config.forceWebSearch}`);
         this.logger.info(`  Force URL Context: ${config.forceUrlContext}`);
+        this.logger.info(`  Check Update: ${config.checkUpdate}`);
+        this.logger.info(`  Default Safety Threshold: ${config.safetySettingsThreshold}`);
         this.logger.info(`  Auto Update Auth: ${config.enableAuthUpdate}`);
+        this.logger.info(`  Usage Stats: ${config.enableUsageStats}`);
         this.logger.info(`  Max Contexts: ${config.maxContexts === 0 ? "Unlimited" : config.maxContexts}`);
         this.logger.info(
             `  Usage-based Switch Threshold: ${

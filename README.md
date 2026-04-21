@@ -50,6 +50,7 @@
    API 服务将在 `http://localhost:7860` 上运行。
 
    服务启动后，您可以在浏览器中访问 `http://localhost:7860` 打开 Web 控制台主页，在这里可以查看账号状态和服务状态。
+   请求统计数据会持久化保存到 `/data/usage-stats.jsonl`。
 
 5. 更新到最新版本（已有本地部署时）：
 
@@ -73,6 +74,7 @@ docker run -d \
   --name aistudio-to-api \
   -p 7860:7860 \
   -v /path/to/auth:/app/configs/auth \
+  -v /path/to/data:/app/data \
   -e API_KEYS=your-api-key-1,your-api-key-2 \
   -e TZ=Asia/Shanghai \
   --restart unless-stopped \
@@ -83,8 +85,9 @@ docker run -d \
 
 参数说明：
 
-- `-p 7860:7860`：API 服务器端口（如果使用反向代理，强烈建议改成 127.0.0.1:7860）
+- `-p 7860:7860`：API 服务器端口（如果使用反向代理，强烈建议改成 `127.0.0.1:7860`）
 - `-v /path/to/auth:/app/configs/auth`：挂载包含认证文件的目录
+- `-v /path/to/data:/app/data`：挂载统计数据持久化目录（`/app/data/usage-stats.jsonl`）
 - `-e API_KEYS`：用于身份验证的 API 密钥列表（使用逗号分隔）
 - `-e TZ=Asia/Shanghai`：时区设置（可选，默认使用系统时区）
 
@@ -106,6 +109,8 @@ services:
     volumes:
       # 挂载包含认证文件的目录
       - ./auth:/app/configs/auth
+      # 挂载统计数据持久化目录
+      - ./data:/app/data
     environment:
       # 用于身份验证的 API 密钥列表（使用逗号分隔）
       API_KEYS: your-api-key-1,your-api-key-2
@@ -132,6 +137,7 @@ services:
      --name aistudio-to-api \
      -p 7860:7860 \
      -v /path/to/auth:/app/configs/auth \
+     -v /path/to/data:/app/data \
      -e API_KEYS=your-api-key-1,your-api-key-2 \
      -e TZ=Asia/Shanghai \
      --restart unless-stopped \
@@ -247,13 +253,15 @@ services:
 
 #### 🗒️ 其他配置
 
-| 变量名                     | 描述                                                                                | 默认值   |
-| :------------------------- | :---------------------------------------------------------------------------------- | :------- |
-| `STREAMING_MODE`           | 流式传输模式。`real` 为真流式，`fake` 为假流式。                                    | `real`   |
-| `FORCE_THINKING`           | 强制为所有请求启用思考模式。                                                        | `false`  |
-| `FORCE_WEB_SEARCH`         | 强制为所有请求启用网络搜索。                                                        | `false`  |
-| `FORCE_URL_CONTEXT`        | 强制为所有请求启用 URL 上下文。                                                     | `false`  |
-| `CAMOUFOX_EXECUTABLE_PATH` | Camoufox 浏览器的可执行文件路径（支持绝对或相对路径）。仅在手动下载浏览器时需配置。 | 自动检测 |
+| 变量名                      | 描述                                                                                                        | 默认值   |
+| :-------------------------- | :---------------------------------------------------------------------------------------------------------- | :------- |
+| `STREAMING_MODE`            | 流式传输模式。`real` 为真流式，`fake` 为假流式。                                                            | `real`   |
+| `ENABLE_USAGE_STATS`        | 是否启用请求统计。默认为启用；设为 `false` 后，不读取本地统计、不写入统计，`/api/usage-stats` 返回空数据。  | `true`   |
+| `SAFETY_SETTINGS_THRESHOLD` | 安全设置的等级。官方说明：[Safety settings](https://ai.google.dev/gemini-api/docs/safety-settings?hl=zh-cn) | `OFF`    |
+| `FORCE_THINKING`            | 强制为所有请求启用思考模式。                                                                                | `false`  |
+| `FORCE_WEB_SEARCH`          | 强制为所有请求启用网络搜索。                                                                                | `false`  |
+| `FORCE_URL_CONTEXT`         | 强制为所有请求启用 URL 上下文。                                                                             | `false`  |
+| `CAMOUFOX_EXECUTABLE_PATH`  | Camoufox 浏览器的可执行文件路径（支持绝对或相对路径）。仅在手动下载浏览器时需配置。                         | 自动检测 |
 
 ### ⚡ 账号自动填充
 
@@ -271,7 +279,9 @@ services:
 
 > 💡 **提示：** 思考参数预留了通过模型后缀名来设置的功能，支持在模型名后面通过 `-THINKING_LEVEL` 或 `(THINKING_LEVEL)` 来设置（`THINKING_LEVEL` 支持 `high`、`low`、`medium`、`minimal`，不区分大小写）。例如：`gemini-3-flash-preview(minimal)` 或 `gemini-3-flash-preview-minimal`。
 >
-> 真假流式也支持通过模型名后缀覆盖，支持在模型名最后追加 `-real` 或 `-fake`。该后缀优先级高于系统的真假流式，但只会在流式请求中生效。例如：`gemini-3-flash-preview-fake`。若和思考后缀同时使用，真假流后缀必须放在最后，例如：`gemini-3-flash-preview-minimal-fake` 或 `gemini-3-flash-preview(minimal)-real`。
+> 真假流式也支持通过模型名后缀覆盖，支持追加 `-real` 或 `-fake`。该后缀优先级高于系统的真假流式，但只会在流式请求中生效。例如：`gemini-3-flash-preview-fake`。若和思考后缀同时使用，真假流后缀应放在思考后缀之后，例如：`gemini-3-flash-preview-minimal-fake` 或 `gemini-3-flash-preview(minimal)-real`。
+>
+> 联网搜索也支持通过模型名后缀强制开启，支持在模型名最后追加 `-search`。例如：`gemini-3-flash-preview-search`。若和其他后缀同时使用，`-search` 必须放在最末尾；完整组合顺序仍为“思考 -> 流式 -> 搜索”，例如：`gemini-3-flash-preview-minimal-search`、`gemini-3-flash-preview-real-search` 或 `gemini-3-flash-preview(minimal)-fake-search`。
 
 ## 📄 许可证
 

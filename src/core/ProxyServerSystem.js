@@ -12,6 +12,7 @@ const http = require("http");
 const https = require("https");
 const fs = require("fs");
 const net = require("net");
+const path = require("path");
 const { URL } = require("url");
 
 const LoggingService = require("../utils/LoggingService");
@@ -19,6 +20,7 @@ const AuthSource = require("../auth/AuthSource");
 const BrowserManager = require("./BrowserManager");
 const ConnectionRegistry = require("./ConnectionRegistry");
 const RequestHandler = require("./RequestHandler");
+const UsageStatsService = require("./UsageStatsService");
 const ConfigLoader = require("../utils/ConfigLoader");
 const WebRoutes = require("../routes/WebRoutes");
 
@@ -40,6 +42,12 @@ class ProxyServerSystem extends EventEmitter {
 
         this.authSource = new AuthSource(this.logger);
         this.browserManager = new BrowserManager(this.logger, this.config, this.authSource);
+        this.usageStatsService = new UsageStatsService(
+            this.authSource,
+            this.logger,
+            path.join(process.cwd(), "data"),
+            this.config.enableUsageStats
+        );
 
         // Create ConnectionRegistry with lightweight reconnect callback
         // When WebSocket connection is lost but browser is still running,
@@ -413,6 +421,7 @@ class ProxyServerSystem extends EventEmitter {
         app.use((req, res, next) => {
             if (
                 req.path !== "/api/status" &&
+                req.path !== "/api/usage-stats" &&
                 req.path !== "/" &&
                 req.path !== "/favicon.ico" &&
                 req.path !== "/login" &&
@@ -502,7 +511,6 @@ class ProxyServerSystem extends EventEmitter {
         });
 
         // Serve static files from ui/dist (Vite build output)
-        const path = require("path");
         app.use(express.static(path.join(__dirname, "..", "..", "ui", "dist")));
 
         // Serve additional public assets under ui/public
