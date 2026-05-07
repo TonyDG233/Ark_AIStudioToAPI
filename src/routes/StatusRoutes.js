@@ -182,6 +182,71 @@ class StatusRoutes {
             res.json(snapshot || UsageStatsService.createEmptySnapshot());
         });
 
+        app.get("/api/usage-stats/download", isAuthenticated, async (req, res) => {
+            try {
+                const usageStatsService = this.serverSystem.usageStatsService;
+                if (!usageStatsService?.enabled) {
+                    return res.status(403).json({ message: "usageStatsDisabled" });
+                }
+                if (usageStatsService.isImportingStats) {
+                    return res.status(409).json({ message: "usageStatsImportInProgress" });
+                }
+                const statsFilePath =
+                    usageStatsService?.statsFilePath || path.join(process.cwd(), "data", "usage-stats.jsonl");
+
+                if (usageStatsService?.appendPromise) {
+                    await usageStatsService.appendPromise.catch(() => {});
+                }
+
+                if (!fs.existsSync(statsFilePath)) {
+                    return res.status(404).json({ message: "usageStatsDownloadNoData" });
+                }
+
+                if (req.query.check === "1") {
+                    return res.json({ ok: true });
+                }
+
+                res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+                res.sendFile(statsFilePath);
+            } catch (error) {
+                this.logger.error(`[WebUI] Failed to download usage stats: ${error.message}`);
+                res.status(500).json({ error: error.message, message: "usageStatsDownloadFailed" });
+            }
+        });
+
+        app.post("/api/usage-stats/import", isAuthenticated, async (req, res) => {
+            try {
+                const usageStatsService = this.serverSystem.usageStatsService;
+                if (!usageStatsService?.enabled) {
+                    return res.status(403).json({ message: "usageStatsDisabled" });
+                }
+                if (usageStatsService.isImportingStats) {
+                    return res.status(409).json({ message: "usageStatsImportInProgress" });
+                }
+
+                const { content, filename } = req.body || {};
+                if (typeof filename !== "string" || !filename.toLowerCase().endsWith(".jsonl")) {
+                    return res.status(400).json({ message: "usageStatsImportJsonlOnly" });
+                }
+                if (typeof content !== "string") {
+                    return res.status(400).json({ message: "usageStatsImportInvalidFile" });
+                }
+
+                const result = await usageStatsService.importJsonl(content);
+                res.json({
+                    duplicateCount: result.duplicateCount,
+                    importedCount: result.importedCount,
+                    invalidLineCount: result.invalidLineCount,
+                    message: "usageStatsImportSuccess",
+                    missingRequestIdCount: result.missingRequestIdCount,
+                    totalRecords: result.totalRecords,
+                });
+            } catch (error) {
+                this.logger.error(`[WebUI] Failed to import usage stats: ${error.message}`);
+                res.status(500).json({ error: error.message, message: "usageStatsImportFailed" });
+            }
+        });
+
         app.put("/api/accounts/current", isAuthenticated, async (req, res) => {
             try {
                 if (this._rejectIfSystemBusy(res)) return;

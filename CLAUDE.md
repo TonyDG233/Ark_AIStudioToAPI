@@ -171,7 +171,7 @@ Edit `configs/models.json` to customize available models and their settings.
 - Browser contexts connect to WebSocket server on WS_PORT
 - Each connection identified by authIndex
 - MessageQueue pattern for request/response correlation
-- Grace period (60s) for reconnection before triggering callback
+- Up to 130s total reconnection wait before full recovery (10s grace period + 120s lightweight reconnect timeout)
 
 ### Account Switching
 

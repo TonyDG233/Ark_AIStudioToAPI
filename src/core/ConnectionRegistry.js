@@ -9,6 +9,9 @@ const { EventEmitter } = require("events");
 const MessageQueue = require("../utils/MessageQueue");
 const { ReconnectCancelledError, isReconnectCancelledError } = require("../utils/CustomErrors");
 
+const RECONNECT_GRACE_PERIOD_MS = 10000;
+const LIGHTWEIGHT_RECONNECT_TIMEOUT_MS = 120000;
+
 /**
  * Connection Registry Module
  * Responsible for managing WebSocket connections and message queues
@@ -165,7 +168,9 @@ class ConnectionRegistry extends EventEmitter {
             clearTimeout(this.reconnectGraceTimers.get(disconnectedAuthIndex));
         }
 
-        this.logger.info(`[Server] Starting 10-second reconnect grace period for account #${disconnectedAuthIndex}...`);
+        this.logger.info(
+            `[Server] Starting ${RECONNECT_GRACE_PERIOD_MS / 1000}-second reconnect grace period for account #${disconnectedAuthIndex}...`
+        );
         const graceTimerId = setTimeout(async () => {
             this.logger.debug(
                 `[Server] Grace period ended for account #${disconnectedAuthIndex}, no reconnection detected.`
@@ -180,9 +185,8 @@ class ConnectionRegistry extends EventEmitter {
             const isAccountReconnecting = this.reconnectingAccounts.get(disconnectedAuthIndex) || false;
             if (this.onConnectionLostCallback && !isAccountReconnecting) {
                 this.reconnectingAccounts.set(disconnectedAuthIndex, true);
-                const lightweightReconnectTimeoutMs = 50000;
                 this.logger.info(
-                    `[Server] Attempting lightweight reconnect for account #${disconnectedAuthIndex} (timeout ${lightweightReconnectTimeoutMs / 1000}s)...`
+                    `[Server] Attempting lightweight reconnect for account #${disconnectedAuthIndex} (timeout ${LIGHTWEIGHT_RECONNECT_TIMEOUT_MS / 1000}s)...`
                 );
                 let timeoutId;
                 let timeoutReject;
@@ -192,7 +196,7 @@ class ConnectionRegistry extends EventEmitter {
                         timeoutReject = reject;
                         timeoutId = setTimeout(
                             () => reject(new Error("Lightweight reconnect timed out")),
-                            lightweightReconnectTimeoutMs
+                            LIGHTWEIGHT_RECONNECT_TIMEOUT_MS
                         );
                     });
                     // Store timeout ID and reject function so they can be cleared/resolved if connection is re-established
@@ -229,7 +233,7 @@ class ConnectionRegistry extends EventEmitter {
             }
 
             this.reconnectGraceTimers.delete(disconnectedAuthIndex);
-        }, 10000);
+        }, RECONNECT_GRACE_PERIOD_MS);
 
         if (disconnectedAuthIndex !== undefined && disconnectedAuthIndex >= 0) {
             this.reconnectGraceTimers.set(disconnectedAuthIndex, graceTimerId);

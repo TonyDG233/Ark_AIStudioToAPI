@@ -230,8 +230,8 @@ class RequestProcessor {
             this.cancelledAttempts.delete(attemptKey);
         }
 
-        // Timeout constants - aligned with server-side timeouts
-        const IDLE_TIMEOUT_DURATION = 300000; // 300 seconds (5 minutes) - matches FAKE_STREAM timeout
+        // Browser-side safety cap. Server-side timeouts can be configured with env vars.
+        const IDLE_TIMEOUT_DURATION = 300000; // 300 seconds (5 minutes)
         const abortController = new AbortController();
         const activeOperation = { abortController, requestAttemptId };
         this.activeOperations.set(operationId, activeOperation);
@@ -423,6 +423,9 @@ class RequestProcessor {
                         if (bodyObj.generationConfig?.responseMimeType) {
                             delete bodyObj.generationConfig.responseMimeType;
                         }
+                        if (bodyObj.generationConfig?.responseJsonSchema) {
+                            delete bodyObj.generationConfig.responseJsonSchema;
+                        }
                     }
 
                     // --- Module 1.5: responseModalities Handling ---
@@ -442,28 +445,18 @@ class RequestProcessor {
                     }
 
                     // --- Module 2: Computer-Use Model Filtering ---
-                    // Remove tools, responseModalities
-                    const isComputerUseModel = requestSpec.path.includes("computer-use");
-                    if (isComputerUseModel) {
-                        const incompatibleKeys = ["tool_config", "toolChoice", "tools"];
-                        incompatibleKeys.forEach(key => {
-                            if (Object.prototype.hasOwnProperty.call(bodyObj, key)) delete bodyObj[key];
-                        });
-                        if (bodyObj.generationConfig?.responseModalities) {
-                            delete bodyObj.generationConfig.responseModalities;
-                        }
-                    }
-
                     // --- Module 3: Robotics Model Filtering ---
-                    // Remove googleSearch, urlContext from tools; also remove responseModalities
+                    const isComputerUseModel = requestSpec.path.includes("computer-use");
                     const isRoboticsModel = requestSpec.path.includes("robotics");
-                    if (isRoboticsModel) {
-                        if (Array.isArray(bodyObj.tools)) {
-                            bodyObj.tools = bodyObj.tools.filter(t => !t.googleSearch && !t.urlContext);
-                            if (bodyObj.tools.length === 0) delete bodyObj.tools;
-                        }
+                    if (isComputerUseModel || isRoboticsModel) {
                         if (bodyObj.generationConfig?.responseModalities) {
                             delete bodyObj.generationConfig.responseModalities;
+                        }
+                        if (bodyObj.generationConfig?.responseMimeType) {
+                            delete bodyObj.generationConfig.responseMimeType;
+                        }
+                        if (bodyObj.generationConfig?.responseJsonSchema) {
+                            delete bodyObj.generationConfig.responseJsonSchema;
                         }
                     }
 
@@ -677,8 +670,8 @@ class ProxySystem extends EventTarget {
             let fullBody = "";
 
             // --- Core modification: Correctly dispatch streaming and non-streaming data inside the loop ---
-            // Add timeout protection for each chunk read - aligned with server-side timeouts
-            const CHUNK_READ_TIMEOUT = 300000; // 300 seconds (5 minutes) - matches MESSAGE_QUEUE_DEFAULT timeout
+            // Browser-side safety cap for each chunk read.
+            const CHUNK_READ_TIMEOUT = 300000; // 300 seconds (5 minutes)
             let processing = true;
             while (processing) {
                 // Check if WebSocket is still connected

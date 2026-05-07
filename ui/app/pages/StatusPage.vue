@@ -1564,6 +1564,61 @@
                         <h1>{{ t("usageStats") }}</h1>
                     </div>
                     <div class="page-meta">
+                        <input
+                            ref="usageStatsImportInput"
+                            type="file"
+                            style="display: none"
+                            accept=".jsonl"
+                            @change="handleUsageStatsImport"
+                        />
+                        <button
+                            class="meta-chip stats-download-button"
+                            type="button"
+                            :title="t('importUsageStats')"
+                            :aria-label="t('importUsageStats')"
+                            :disabled="isUsageStatsTransferBusy"
+                            @click="triggerUsageStatsImport"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                        </button>
+                        <button
+                            class="meta-chip stats-download-button"
+                            type="button"
+                            :title="t('exportUsageStats')"
+                            :aria-label="t('exportUsageStats')"
+                            :disabled="isUsageStatsTransferBusy"
+                            @click="downloadUsageStats"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                        </button>
                         <span class="meta-chip">
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -2739,7 +2794,11 @@ import EnvVarTooltip from "../components/EnvVarTooltip.vue";
 
 const router = useRouter();
 const fileInput = ref(null);
+const usageStatsImportInput = ref(null);
 const activeTab = ref("home");
+const isDownloadingUsageStats = ref(false);
+const isImportingUsageStats = ref(false);
+const isUsageStatsTransferBusy = computed(() => isDownloadingUsageStats.value || isImportingUsageStats.value);
 
 // Create reactive version counter
 const langVersion = ref(0);
@@ -4728,11 +4787,7 @@ const downloadAccountByIndex = accountIndex => {
     window.location.href = `/api/files/auth-${accountIndex}.json`;
 };
 
-// Download current logs
-const downloadCurrentLogs = () => {
-    if (!state.logs) return;
-
-    const blob = new Blob([state.logs], { type: "text/plain" });
+const formatDownloadTimestamp = () => {
     const now = new Date();
     const YYYY = now.getFullYear();
     const MM = String(now.getMonth() + 1).padStart(2, "0");
@@ -4741,7 +4796,150 @@ const downloadCurrentLogs = () => {
     const mm = String(now.getMinutes()).padStart(2, "0");
     const ss = String(now.getSeconds()).padStart(2, "0");
 
-    const filename = `AIStudioProxy_${YYYY}-${MM}-${DD}_${HH}${mm}${ss}_${state.logCount}.log`;
+    return `${YYYY}-${MM}-${DD}_${HH}${mm}${ss}`;
+};
+
+const readFileAsText = file =>
+    new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.onerror = () => reject(new Error(t("fileReadFailed")));
+        reader.readAsText(file);
+    });
+
+const triggerUsageStatsImport = () => {
+    if (isUsageStatsTransferBusy.value) return;
+
+    ElMessageBox.confirm(t("usageStatsImportConfirm"), t("warningTitle"), {
+        cancelButtonText: t("cancel"),
+        confirmButtonText: t("ok"),
+        lockScroll: false,
+        type: "warning",
+    })
+        .then(() => usageStatsImportInput.value?.click())
+        .catch(e => {
+            if (e !== "cancel") {
+                console.error(e);
+            }
+        });
+};
+
+const handleUsageStatsImport = async event => {
+    const [file] = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!file) return;
+    if (isUsageStatsTransferBusy.value) return;
+
+    if (!file.name.toLowerCase().endsWith(".jsonl")) {
+        ElMessage.error(t("usageStatsImportJsonlOnly"));
+        return;
+    }
+
+    isImportingUsageStats.value = true;
+    try {
+        const content = await readFileAsText(file);
+        const res = await fetch("/api/usage-stats/import", {
+            body: JSON.stringify({ content, filename: file.name }),
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+        });
+
+        if (res.redirected) {
+            window.location.href = res.url;
+            return;
+        }
+        if (res.status === 401) {
+            window.location.href = "/login";
+            return;
+        }
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            showUsageStatsImportNotification({
+                message: t(data.message || "usageStatsImportFailed", { error: data.error || `HTTP ${res.status}` }),
+                title: t("usageStatsImportResult"),
+                type: "error",
+            });
+            return;
+        }
+
+        showUsageStatsImportNotification({
+            message: t("usageStatsImportSuccess", data),
+            title: t("usageStatsImportResult"),
+            type: "success",
+        });
+        await fetchUsageStats();
+    } catch (error) {
+        showUsageStatsImportNotification({
+            message: t("usageStatsImportFailed", { error: error.message }),
+            title: t("usageStatsImportResult"),
+            type: "error",
+        });
+    } finally {
+        isImportingUsageStats.value = false;
+    }
+};
+
+const showUsageStatsImportNotification = ({ message, title, type }) => {
+    ElNotification({
+        dangerouslyUseHTMLString: true,
+        duration: 0,
+        message: `<div style="max-height: 50vh; overflow-y: auto; word-break: break-word;">${escapeHtml(message)}</div>`,
+        position: "top-right",
+        title,
+        type,
+    });
+};
+
+// Download persisted usage stats JSONL
+const downloadUsageStats = async () => {
+    if (isUsageStatsTransferBusy.value) return;
+    isDownloadingUsageStats.value = true;
+
+    try {
+        const res = await fetch("/api/usage-stats/download?check=1");
+        if (res.redirected) {
+            window.location.href = res.url;
+            return;
+        }
+        if (res.status === 401) {
+            window.location.href = "/login";
+            return;
+        }
+        if (!res.ok) {
+            let message = "usageStatsDownloadFailed";
+            try {
+                const data = await res.json();
+                message = data.message || message;
+                ElMessage.error(t(message, { error: data.error || `HTTP ${res.status}` }));
+                return;
+            } catch {
+                // Ignore non-JSON error responses.
+            }
+            ElMessage.error(t(message, { error: `HTTP ${res.status}` }));
+            return;
+        }
+
+        const filename = `AIStudioToAPI_usage-stats_${formatDownloadTimestamp()}.jsonl`;
+        const a = document.createElement("a");
+        a.href = "/api/usage-stats/download";
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    } catch (error) {
+        ElMessage.error(t("usageStatsDownloadFailed", { error: error.message }));
+    } finally {
+        isDownloadingUsageStats.value = false;
+    }
+};
+
+// Download current logs
+const downloadCurrentLogs = () => {
+    if (!state.logs) return;
+
+    const blob = new Blob([state.logs], { type: "text/plain" });
+    const filename = `AIStudioToAPI_${formatDownloadTimestamp()}_${state.logCount}.log`;
 
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -5726,6 +5924,20 @@ watchEffect(() => {
     &:hover {
         border-color: @primary-color;
         color: @primary-color;
+    }
+}
+
+.stats-download-button {
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    cursor: pointer;
+    font-family: inherit;
+
+    &:disabled {
+        cursor: wait;
+        opacity: 0.65;
     }
 }
 

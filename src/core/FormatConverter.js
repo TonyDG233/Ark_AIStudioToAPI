@@ -292,20 +292,6 @@ class FormatConverter {
             const result = Array.isArray(obj) ? [] : {};
 
             for (const key of Object.keys(obj)) {
-                // Skip fields not supported by Gemini API
-                const unsupportedKeys = [
-                    "$schema",
-                    "additionalProperties",
-                    "ref",
-                    "$ref",
-                    "propertyNames",
-                    "patternProperties",
-                    "unevaluatedProperties",
-                ];
-                if (unsupportedKeys.includes(key)) {
-                    continue;
-                }
-
                 if (key === "type" && typeof obj[key] === "string") {
                     // Convert lowercase type to uppercase for Gemini
                     result[key] = obj[key].toUpperCase();

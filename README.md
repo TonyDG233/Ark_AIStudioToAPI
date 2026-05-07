@@ -30,9 +30,11 @@
    npm run setup-auth
    ```
 
+   自动填充和无交互模式示例请看 [账号自动填充](#-账号自动填充) 部分。
+
    该脚本将：
    - 自动下载 Camoufox 浏览器（一个注重隐私的 Firefox 分支）
-   - 启动浏览器并自动导航到 AI Studio
+   - 启动浏览器并打开 AI Studio，引导您手动完成登录
    - 在本地保存您的身份验证凭据（auth 文件位于 `/configs/auth`）
 
    > 💡 **提示：** 如果下载 Camoufox 浏览器失败或等待太久，可以自行点击 [此处](https://github.com/daijro/camoufox/releases/tag/v135.0.1-beta.24) 下载，然后设置环境变量 `CAMOUFOX_EXECUTABLE_PATH` 为可执行文件的路径（支持绝对和相对路径）。
@@ -172,6 +174,9 @@ services:
 
 ### 🐾 Claw Cloud Run 部署
 
+> ℹ **Claw Cloud Run 公告：** Claw Cloud Run 已宣布停止产品及相关服务；所有服务将于 **2026/05/11 00:00 UTC** 停止，建议在此之前导出或备份数据。详情请参阅官方公告：
+> [公告](https://question.run.claw.cloud/questions/10010000000003261)
+
 支持直接部署到 Claw Cloud Run，全托管的容器平台。
 
 > 📖 详细部署说明请参阅：[部署到 Claw Cloud Run](docs/zh/claw-cloud-run.md)
@@ -214,6 +219,18 @@ services:
 
 > 📖 详细的 API 使用示例请参阅：[API 使用示例文档](docs/zh/api-examples.md)
 
+## 🖥️ 推荐前端：AMC WebUI
+
+[AMC WebUI](https://github.com/yeahhe365/AMC-WebUI) 是一款面向 Gemini 的 Local-First AI 工作流 WebUI，集成多模态聊天、Canvas、文件处理、实时搜索、代码执行与高级推理。它已经支持将 AIStudioToAPI 作为第三方 Gemini 兼容后端使用，可以作为本项目的图形化前端。
+
+在线 Demo：[https://all-model-chat.pages.dev](https://all-model-chat.pages.dev)
+
+使用方式：
+
+- 先部署并启动 AIStudioToAPI，确保 Gemini 原生 API 地址可访问，例如 `http://localhost:7860/v1beta`。
+- 在 AMC WebUI 中进入 **设置 -> API 配置**，启用“自定义 API 配置”，并将 Gemini 兼容 Base URL 填为 AIStudioToAPI 的 `/v1beta` 地址。
+- AMC WebUI 中填写的 API Key 应与 AIStudioToAPI 部署时配置的 `API_KEYS` 对应。
+
 ## 🧰 相关配置
 
 ### 🔧 环境变量
@@ -243,6 +260,8 @@ services:
 | `ENABLE_AUTH_UPDATE`            | 是否启用自动保存凭证更新。默认为启用状态，将在每次登录/切换账号成功时以及每 24 小时自动更新 auth 文件。设为 `false` 禁用。                                          | `true`    |
 | `MAX_RETRIES`                   | 请求失败后的最大重试次数（仅对假流式和非流式生效）。                                                                                                                | `3`       |
 | `RETRY_DELAY`                   | 两次重试之间的间隔（毫秒）。                                                                                                                                        | `2000`    |
+| `STREAM_TIMEOUT_MS`             | 真流式响应相邻数据块之间的超时时间（毫秒），最大 `300000`。                                                                                                         | `60000`   |
+| `FAKE_STREAM_TIMEOUT_MS`        | 假流式/非流式缓冲响应的超时时间（毫秒），最大 `300000`。                                                                                                            | `300000`  |
 | `SWITCH_ON_USES`                | 自动切换帐户前允许的请求次数（设为 `0` 禁用）。                                                                                                                     | `40`      |
 | `FAILURE_THRESHOLD`             | 切换帐户前允许的连续失败次数（设为 `0` 禁用）。                                                                                                                     | `3`       |
 | `IMMEDIATE_SWITCH_STATUS_CODES` | 触发立即切换帐户的 HTTP 状态码（逗号分隔，设为空值以禁用）。                                                                                                        | `429,503` |
@@ -268,10 +287,14 @@ services:
 为了简化多个账号的登录流程，您可以通过配置 `users.csv` 文件来实现自动填充：
 
 1. 在项目根目录创建 `users.csv`。
-2. 格式为：`email,password`（每行一个）。
+2. 格式为：`email,password,recovery_email,totp_secret`（每行一个，`recovery_email` 和 `totp_secret` 可选）。
 3. 运行 `npm run setup-auth` 后按提示选择账号。
 
 > 📖 详细配置说明请参阅：[账号自动填充指南](docs/zh/auto-fill-guide.md)
+>
+> 💡 **提示**：如果需要无交互执行，可使用 `npm run setup-auth -- --non-interactive --account 1`，或直接传入 `--email` / `--password`。
+>
+> 💡 **批量添加**：使用 `npm run setup-auth-batch -- --headless` 可按顺序添加 `users.csv` 中的全部账号。
 
 ### 🧠 模型列表配置
 

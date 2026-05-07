@@ -7,7 +7,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { firefox, devices } = require("playwright");
+const { firefox } = require("playwright");
 const os = require("os");
 
 const { parseProxyFromEnv } = require("../utils/ProxyUtils");
@@ -17,6 +17,8 @@ const {
     ContextAbortedError,
     isContextAbortedError,
 } = require("../utils/CustomErrors");
+
+const WS_INIT_TIMEOUT_MS = 120000;
 
 /**
  * Browser Manager Module
@@ -67,7 +69,7 @@ class BrowserManager {
         this._wsInitState = new Map();
 
         // Target URL for AI Studio app
-        this.targetUrl = "https://ai.studio/apps/c48c6178-8dad-4d16-8de7-bb78d265482c";
+        this.targetUrl = "https://ai.studio/apps/fa9cb8e6-4d92-4fb6-a2b1-b947405c22ae";
 
         // Firefox/Camoufox does not use Chromium-style command line args.
         // We keep this empty; Camoufox has its own anti-fingerprinting optimizations built-in.
@@ -176,7 +178,7 @@ class BrowserManager {
      * Supports abort for background tasks and context deletion
      * @param {object} page - Playwright page object
      * @param {string} logPrefix - Log prefix for messages
-     * @param {number} timeout - Timeout in milliseconds (default 60000)
+     * @param {number} timeout - Timeout in milliseconds (default 120000)
      * @param {number} authIndex - Auth index for this context (default -1)
      * @param {boolean} isBackgroundTask - Whether this is a background preload task (default false)
      * @returns {Promise<boolean>} true if initialization succeeded, false if failed or aborted
@@ -184,7 +186,7 @@ class BrowserManager {
     async _waitForWebSocketInit(
         page,
         logPrefix = "[Browser]",
-        timeout = 60000,
+        timeout = WS_INIT_TIMEOUT_MS,
         authIndex = -1,
         isBackgroundTask = false
     ) {
@@ -1307,14 +1309,11 @@ class BrowserManager {
         // This browser instance is temporary and specific to the VNC session.
         // It does NOT affect the main `this.browser` used for the API proxy.
         const vncBrowser = await firefox.launch({
-            args: this.launchArgs,
             env: {
                 ...process.env,
                 ...extraArgs.env,
             },
             executablePath: this.browserExecutablePath,
-            firefoxUserPrefs: this.firefoxUserPrefs,
-            // Must be false for VNC to be visible.
             headless: false,
             ...(proxyConfig ? { proxy: proxyConfig } : {}),
         });
@@ -1327,12 +1326,10 @@ class BrowserManager {
 
         let contextOptions = {};
         if (extraArgs.isMobile) {
-            this.logger.info("[VNC] Mobile device detected. Applying mobile user-agent, viewport, and touch events.");
-            const mobileDevice = devices["Pixel 5"];
+            this.logger.info("[VNC] Mobile client detected; applying Firefox Android context for VNC login.");
             contextOptions = {
-                hasTouch: mobileDevice.hasTouch,
-                userAgent: mobileDevice.userAgent,
-                viewport: { height: 915, width: 412 }, // Set a specific portrait viewport
+                hasTouch: true,
+                userAgent: "Mozilla/5.0 (Android 10; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0",
             };
         }
 
@@ -2026,12 +2023,12 @@ class BrowserManager {
             if (wsState && wsState.success) {
                 this.logger.info(`[Context#${authIndex}] ✅ WebSocket already initialized, skipping wait`);
             } else {
-                // Wait for WebSocket initialization (60 second timeout)
+                // Wait for WebSocket initialization (120 second timeout)
                 // This will throw an abort error if the context is aborted during wait
                 const initSuccess = await this._waitForWebSocketInit(
                     page,
                     `[Context#${authIndex}]`,
-                    60000,
+                    WS_INIT_TIMEOUT_MS,
                     authIndex,
                     isBackgroundTask
                 );
@@ -2378,11 +2375,11 @@ class BrowserManager {
             if (wsState && wsState.success) {
                 this.logger.info(`[Reconnect] ✅ WebSocket already initialized, skipping wait`);
             } else {
-                // Wait for WebSocket initialization (60 second timeout)
+                // Wait for WebSocket initialization (120 second timeout)
                 const initSuccess = await this._waitForWebSocketInit(
                     page,
                     "[Reconnect]",
-                    60000,
+                    WS_INIT_TIMEOUT_MS,
                     targetAuthIndex,
                     false
                 );
