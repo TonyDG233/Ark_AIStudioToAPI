@@ -87,8 +87,59 @@ class RequestHandler {
         return match?.[1] || null;
     }
 
+    _isOpenAIEmbeddingsPath(pathValue) {
+        return typeof pathValue === "string" && /^\/v1(?:\/openai)?\/embeddings\/?$/i.test(pathValue);
+    }
+
+    _convertEmbedContentBodyToBatch(bodyObj, modelName) {
+        return {
+            requests: [
+                {
+                    ...bodyObj,
+                    model: `models/${modelName}`,
+                },
+            ],
+        };
+    }
+
+    _normalizeBatchEmbedContentBody(bodyObj, modelName) {
+        if (!bodyObj || !Array.isArray(bodyObj.requests)) return bodyObj;
+
+        return {
+            ...bodyObj,
+            requests: bodyObj.requests.map(request => ({
+                ...request,
+                model: `models/${modelName}`,
+            })),
+        };
+    }
+
+    _convertBatchEmbedResponseToEmbedContent(fullBodyBuffer) {
+        const batchResponse = JSON.parse(fullBodyBuffer.toString());
+        const embedding = Array.isArray(batchResponse.embeddings) ? batchResponse.embeddings[0] : null;
+
+        if (!embedding) {
+            throw new Error("Backend batchEmbedContents response did not contain embeddings[0].");
+        }
+
+        return Buffer.from(JSON.stringify({ embedding }));
+    }
+
+    _isNonRetryableEmbeddingClientError(errorDetails, proxyRequest) {
+        const status = Number(errorDetails?.status);
+        if (status !== 400 && status !== 404) return false;
+
+        return this._categorizeRequest(proxyRequest?.path, "request") === "embedding";
+    }
+
     _categorizeRequest(pathValue, fallback = "request") {
         if (typeof pathValue !== "string") return fallback;
+        if (
+            pathValue.includes("embedContent") ||
+            pathValue.includes("batchEmbedContents") ||
+            this._isOpenAIEmbeddingsPath(pathValue)
+        )
+            return "embedding";
         if (pathValue.includes("countTokens") || pathValue.includes("input_tokens")) return "count_tokens";
         if (pathValue.includes("generateContent") || pathValue.includes("streamGenerateContent")) return "generation";
         if (pathValue.includes("/upload/")) return "upload";
@@ -822,11 +873,12 @@ class RequestHandler {
     // Process standard Google API requests
     async processRequest(req, res) {
         const requestId = this._generateRequestId();
+        const apiFormat = this._isOpenAIEmbeddingsPath(req.path) ? "openai" : "gemini";
         this._startTrackedRequest(requestId, req, {
-            apiFormat: "gemini",
+            apiFormat,
             requestCategory: this._categorizeRequest(req.path, "request"),
         });
-        this._setResponseApiFormat(res, "gemini");
+        this._setResponseApiFormat(res, apiFormat);
         res.__proxyResponseStreamMode = null;
 
         try {
@@ -882,7 +934,7 @@ class RequestHandler {
 
             this._updateTrackedRequest(requestId, {
                 isStreaming: wantsStream,
-                model: this._extractModelFromPath(proxyRequest.path),
+                model: proxyRequest.tracking_model || this._extractModelFromPath(proxyRequest.path),
                 path: proxyRequest.path,
                 requestCategory: this._categorizeRequest(
                     proxyRequest.path,
@@ -3153,12 +3205,23 @@ class RequestHandler {
             }
 
             const fullBodyBuffer = Buffer.concat(chunks);
+            let responseBodyBuffer = fullBodyBuffer;
 
             try {
-                const fullResponse = JSON.parse(fullBodyBuffer.toString());
+                const fullResponse = JSON.parse(responseBodyBuffer.toString());
                 this._logGeminiNativeResponseDebug(fullResponse, "non-stream");
             } catch (e) {
                 // Ignore JSON parsing errors for finish reason
+            }
+
+            if (proxyRequest.response_transform === "batchEmbedToEmbedContent") {
+                try {
+                    responseBodyBuffer = this._convertBatchEmbedResponseToEmbedContent(responseBodyBuffer);
+                } catch (error) {
+                    this.logger.error(`❌ [Proxy] Failed to convert embedding response: ${error.message}`);
+                    this._sendErrorResponse(res, 500, "Failed to convert backend embedding response");
+                    return;
+                }
             }
 
             this._setResponseHeaders(res, headerMessage, req);
@@ -3168,7 +3231,7 @@ class RequestHandler {
                 res.type("application/json");
             }
 
-            res.send(fullBodyBuffer);
+            res.send(responseBodyBuffer);
             this.logger.info(
                 `✅ [Request] Response completed (Gemini non-stream), request ID: ${proxyRequest.request_id}`
             );
@@ -3289,6 +3352,14 @@ class RequestHandler {
 
                 lastError = errorPayload;
                 this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
+
+                if (this._isNonRetryableEmbeddingClientError(errorPayload, proxyRequest)) {
+                    lastError = { ...errorPayload, skipAccountSwitch: true };
+                    this.logger.warn(
+                        `[Request] Embedding request failed with non-retryable status ${errorPayload.status}; skipping retries and account switching.`
+                    );
+                    break;
+                }
 
                 // Check if we should stop retrying immediately based on status code
                 const errorStatus = Number(errorPayload?.status);
@@ -4047,6 +4118,12 @@ class RequestHandler {
         const fullPath = req.path;
         let cleanPath = fullPath.replace(/^\/proxy/, "");
         const bodyObj = req.body;
+        const originalBodyObj =
+            bodyObj && typeof bodyObj === "object" && !Array.isArray(bodyObj)
+                ? JSON.parse(JSON.stringify(bodyObj))
+                : bodyObj;
+        let responseTransform = null;
+        let trackingModel = null;
 
         this.logger.debug(`[Proxy] Debug: incoming Gemini Body (Google Native) = ${JSON.stringify(bodyObj, null, 2)}`);
 
@@ -4142,6 +4219,33 @@ class RequestHandler {
             }
         }
 
+        const embedContentMatch = cleanPath.match(/^\/v1beta\/models\/([^:]+):embedContent$/);
+        if (req.method === "POST" && embedContentMatch) {
+            const modelName = embedContentMatch[1];
+            cleanPath = `/v1beta/models/${modelName}:batchEmbedContents`;
+            Object.keys(bodyObj).forEach(key => delete bodyObj[key]);
+            Object.assign(bodyObj, this._convertEmbedContentBodyToBatch(originalBodyObj, modelName));
+            responseTransform = "batchEmbedToEmbedContent";
+            trackingModel = modelName;
+            this.logger.info(`[Proxy] Rewriting embedContent to batchEmbedContents for model "${modelName}".`);
+        }
+
+        const batchEmbedContentMatch = cleanPath.match(/^\/v1beta\/models\/([^:]+):batchEmbedContents$/);
+        if (req.method === "POST" && !responseTransform && batchEmbedContentMatch) {
+            const modelName = batchEmbedContentMatch[1];
+            Object.keys(bodyObj).forEach(key => delete bodyObj[key]);
+            Object.assign(bodyObj, this._normalizeBatchEmbedContentBody(originalBodyObj, modelName));
+            trackingModel = modelName;
+        }
+
+        if (req.method === "POST" && this._isOpenAIEmbeddingsPath(cleanPath) && bodyObj) {
+            const rawModelName = typeof bodyObj.model === "string" ? bodyObj.model : null;
+            if (rawModelName) {
+                trackingModel = rawModelName.replace(/^models\//, "");
+            }
+            cleanPath = "/v1/openai/embeddings";
+        }
+
         // Force web search and URL context for native Google requests
         if (
             (this.serverSystem.forceWebSearch || modelForceWebSearch || this.serverSystem.forceUrlContext) &&
@@ -4207,7 +4311,9 @@ class RequestHandler {
             path: cleanPath,
             query_params: req.query || {},
             request_id: requestId,
+            response_transform: responseTransform,
             streaming_mode: modelStreamingMode || this.serverSystem.streamingMode,
+            tracking_model: trackingModel,
         };
     }
 
