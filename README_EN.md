@@ -1,13 +1,13 @@
-# Google AI Studio to API Adapter
+# Google AI Studio Build App to API Adapter
 
 [中文文档](README.md) | English
 
-A tool that wraps Google AI Studio web interface to provide OpenAI API, Gemini API, and Anthropic API compatible endpoints. The service acts as a proxy, converting API requests to browser interactions with the AI Studio web interface.
+A tool that wraps the Google AI Studio Build App web interface to provide OpenAI API, Gemini API, and Anthropic API compatible endpoints. The service acts as a proxy, converting API requests into browser interactions with the AI Studio Build App interface.
 
 ## ✨ Features
 
 - 🔄 **API Compatibility**: Compatible with OpenAI API, Gemini API, and Anthropic API formats
-- 🌐 **Web Automation**: Uses browser automation to interact with AI Studio web interface
+- 🌐 **Web Automation**: Uses browser automation to interact with AI Studio Build
 - 👥 **Multi-Account Support**: Support multiple Google accounts logged in simultaneously for fast switching without re-login
 - 🔧 **Tool Calls Support**: OpenAI, Gemini, and Anthropic APIs all support Tool Calls (Function Calling)
 - 📝 **Model Support**: Access to various Gemini models through AI Studio, including image generation and TTS (text-to-speech) models
@@ -190,26 +190,28 @@ Deploy directly on Claw Cloud Run, a fully managed container platform.
 
 ### 🤖 OpenAI-Compatible API
 
-This endpoint is processed and then forwarded to the official Gemini API format endpoint.
+This endpoint is processed and then forwarded to the Gemini API format endpoint.
 
 - `GET /v1/models`: List models.
 - `POST /v1/chat/completions`: Chat completion and image generation, supports non-streaming, real streaming, and fake streaming.
+- `POST /v1/embeddings`: Generate text embedding vectors.
 - `POST /v1/responses`: OpenAI Responses API compatible endpoint for conversation generation, does not support image generation, and supports non-streaming, real streaming, and fake streaming.
 - `POST /v1/responses/input_tokens`: Count input tokens for an OpenAI Responses API request.
 
 ### ♊ Gemini Native API Format
 
-This endpoint is forwarded to the official Gemini API format endpoint.
+This endpoint is forwarded to the Gemini API format endpoint.
 
 - `GET /v1beta/models`: List available Gemini models.
 - `POST /v1beta/models/{model_name}:generateContent`: Generate content, images, and speech.
 - `POST /v1beta/models/{model_name}:streamGenerateContent`: Stream content, image, and speech generation, supports real and fake streaming.
+- `POST /v1beta/models/{model_name}:embedContent`: Generate a single text embedding vector.
 - `POST /v1beta/models/{model_name}:batchEmbedContents`: Batch generate text embedding vectors.
 - `POST /v1beta/models/{model_name}:predict`: Imagen series models image generation.
 
 ### 👤 Anthropic Compatible API
 
-This endpoint forwards requests to the official Gemini API format endpoint.
+This endpoint forwards requests to the Gemini API format endpoint.
 
 - `GET /v1/models`: List models.
 - `POST /v1/messages`: Chat message completions, supports non-streaming, real streaming, and fake streaming.

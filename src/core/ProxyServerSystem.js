@@ -111,6 +111,7 @@ class ProxyServerSystem extends EventEmitter {
             this.config,
             this.authSource
         );
+        this.browserManager.setSystemBusyProvider(() => this.requestHandler?.isSystemBusy === true);
 
         this.httpServer = null;
         this.wsServer = null;
@@ -551,17 +552,17 @@ class ProxyServerSystem extends EventEmitter {
             this.requestHandler.processOpenAIRequest(req, res);
         });
 
+        app.post(["/v1/embeddings", "/v1/openai/embeddings"], (req, res) => {
+            this.requestHandler.processOpenAIEmbeddingsRequest(req, res);
+        });
+
         // OpenAI Response API compatible endpoint
         app.post("/v1/responses", (req, res) => {
             this.requestHandler.processOpenAIResponseRequest(req, res);
         });
 
         // OpenAI Response API count input tokens endpoint
-        app.post("/v1/responses/input_tokens", (req, res) => {
-            this.requestHandler.processOpenAIResponseInputTokens(req, res);
-        });
-        // Compatibility alias (some clients omit the /v1 prefix)
-        app.post("/responses/input_tokens", (req, res) => {
+        app.post(["/v1/responses/input_tokens", "/responses/input_tokens"], (req, res) => {
             this.requestHandler.processOpenAIResponseInputTokens(req, res);
         });
 

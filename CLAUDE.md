@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AIStudioToAPI is a proxy server that wraps Google AI Studio's web interface and exposes it as API endpoints compatible with OpenAI, Gemini, and Anthropic API formats. The system uses browser automation (Playwright with Camoufox/Firefox) to interact with AI Studio's web interface and translates API requests into browser interactions.
+AIStudioToAPI is a proxy server that exposes Google AI Studio Build App quota as API endpoints compatible with OpenAI, Gemini, and Anthropic API formats. It is not a reverse proxy for the regular AI Studio web UI or AI Studio Playground. The system uses browser automation (Playwright with Camoufox/Firefox) to translate API requests into in-app requests inside a dedicated AI Studio Build App.
 
 ## Common Commands
 

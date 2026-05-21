@@ -350,6 +350,8 @@ class FormatConverter {
                 "exclusiveMinimum",
                 "exclusiveMaximum",
                 "const",
+                "$comment",
+                "enumDescriptions",
             ];
 
             if (isResponseSchema) {
@@ -456,6 +458,28 @@ class FormatConverter {
                 result[key] = this._convertSchemaToGemini(obj[key], isResponseSchema, recursionFlag);
             } else {
                 result[key] = obj[key];
+            }
+        }
+
+        if (!isProperties && Array.isArray(obj.enumDescriptions) && obj.enumDescriptions.length > 0) {
+            const enumValues = Array.isArray(result.enum) ? result.enum : [];
+            const enumDescriptionLines = obj.enumDescriptions
+                .map((description, index) => {
+                    if (description === undefined || description === null || description === "") {
+                        return null;
+                    }
+
+                    const enumValue = enumValues[index];
+                    const label = enumValue === undefined ? `value ${index + 1}` : String(enumValue);
+                    return `- ${label}: ${description}`;
+                })
+                .filter(Boolean);
+
+            if (enumDescriptionLines.length > 0) {
+                const enumDescriptionText = `Enum descriptions:\n${enumDescriptionLines.join("\n")}`;
+                result.description = result.description
+                    ? `${result.description}\n\n${enumDescriptionText}`
+                    : enumDescriptionText;
             }
         }
 
@@ -930,6 +954,30 @@ class FormatConverter {
         this._finalizeGoogleRequest(googleRequest, { forceWebSearch: modelForceWebSearch });
         this.logger.info("[Adapter] OpenAI to Google translation complete.");
         return { cleanModelName, googleRequest, modelStreamingMode };
+    }
+
+    /**
+     * Convert OpenAI embeddings request format to Google's OpenAI-compatible embeddings endpoint.
+     * @param {object} openaiBody - OpenAI embeddings request body
+     * @returns {{ googleRequest: object, cleanModelName: string|null, path: string }}
+     */
+    translateOpenAIEmbeddingsToGoogle(openaiBody) {
+        this.logger.debug(
+            "[Adapter] Starting translation of OpenAI embeddings request format to Google OpenAI-compatible format..."
+        );
+
+        const googleRequest = openaiBody && typeof openaiBody === "object" ? openaiBody : {};
+        const rawModelName = typeof googleRequest.model === "string" ? googleRequest.model : null;
+        const cleanModelName = rawModelName ? rawModelName.replace(/^models\//, "") : null;
+        const path = "/v1beta/openai/embeddings";
+
+        this.logger.debug(
+            `[Adapter] Debug: incoming OpenAI Embeddings Body = ${JSON.stringify(googleRequest, null, 2)}`
+        );
+        this.logger.debug(`[Adapter] Debug: Final Google OpenAI-compatible Embeddings Path = ${path}`);
+        this.logger.debug("[Adapter] OpenAI embeddings to Google OpenAI-compatible translation complete.");
+
+        return { cleanModelName, googleRequest, path };
     }
 
     /**
