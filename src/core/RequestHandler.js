@@ -1061,8 +1061,9 @@ class RequestHandler {
                 return;
             }
 
+            const uploadBodyBuffer = this._patchUploadStartMetadata(req);
             const proxyRequest = {
-                body_b64: req.rawBody ? req.rawBody.toString("base64") : undefined,
+                body_b64: uploadBodyBuffer ? uploadBodyBuffer.toString("base64") : undefined,
                 headers: req.headers,
                 is_generative: false, // Uploads are never generative
                 method: req.method,
@@ -1095,6 +1096,40 @@ class RequestHandler {
         } finally {
             this._finalizeTrackedRequest(requestId, res);
         }
+    }
+
+    _patchUploadStartMetadata(req) {
+        const originalBody = req.rawBody;
+
+        if (!this._isUploadStartRequest(req)) return originalBody;
+
+        const uploadContentType = req.headers["x-goog-upload-header-content-type"];
+        if (!uploadContentType || !originalBody?.length) return originalBody;
+
+        let bodyObj;
+        try {
+            bodyObj = JSON.parse(originalBody.toString());
+        } catch (e) {
+            this.logger.debug(`[Upload] Start metadata is not valid JSON, skipping mimeType patch: ${e.message}`);
+            return originalBody;
+        }
+
+        if (!bodyObj || typeof bodyObj !== "object") return originalBody;
+
+        const fileMetadata = bodyObj.file || bodyObj.file_metadata || bodyObj;
+        if (!fileMetadata || typeof fileMetadata !== "object") return originalBody;
+
+        if (fileMetadata.mimeType || fileMetadata.mime_type) {
+            return originalBody;
+        }
+
+        fileMetadata.mimeType = uploadContentType;
+        return Buffer.from(JSON.stringify(bodyObj));
+    }
+
+    _isUploadStartRequest(req) {
+        const command = String(req.headers["x-goog-upload-command"] || "").toLowerCase();
+        return req.method === "POST" && req.path.includes("/upload/") && command.includes("start");
     }
 
     // Process OpenAI format requests
@@ -1187,10 +1222,10 @@ class RequestHandler {
                     while (true) {
                         this._getUsageStatsService()?.recordAttempt(
                             proxyRequest.request_id,
-                            this.currentAuthIndex,
-                            this._getAccountNameForIndex(this.currentAuthIndex)
+                            currentQueueAuthIndex,
+                            this._getAccountNameForIndex(currentQueueAuthIndex)
                         );
-                        this._forwardRequest(proxyRequest);
+                        this._forwardRequest(proxyRequest, currentQueueAuthIndex);
                         initialMessage = await currentQueue.dequeue();
 
                         const initialStatus = Number(initialMessage?.status);
@@ -1590,10 +1625,10 @@ class RequestHandler {
                     while (true) {
                         this._getUsageStatsService()?.recordAttempt(
                             proxyRequest.request_id,
-                            this.currentAuthIndex,
-                            this._getAccountNameForIndex(this.currentAuthIndex)
+                            currentQueueAuthIndex,
+                            this._getAccountNameForIndex(currentQueueAuthIndex)
                         );
-                        this._forwardRequest(proxyRequest);
+                        this._forwardRequest(proxyRequest, currentQueueAuthIndex);
                         initialMessage = await currentQueue.dequeue();
 
                         const initialStatus = Number(initialMessage?.status);
@@ -1962,10 +1997,10 @@ class RequestHandler {
                     while (true) {
                         this._getUsageStatsService()?.recordAttempt(
                             proxyRequest.request_id,
-                            this.currentAuthIndex,
-                            this._getAccountNameForIndex(this.currentAuthIndex)
+                            currentQueueAuthIndex,
+                            this._getAccountNameForIndex(currentQueueAuthIndex)
                         );
-                        this._forwardRequest(proxyRequest);
+                        this._forwardRequest(proxyRequest, currentQueueAuthIndex);
                         initialMessage = await currentQueue.dequeue();
 
                         const initialStatus = Number(initialMessage?.status);
@@ -2273,14 +2308,16 @@ class RequestHandler {
                     this.currentAuthIndex,
                     proxyRequest.request_attempt_id
                 );
+                const messageQueueAuthIndex =
+                    this.connectionRegistry.getAuthIndexForRequest(requestId) ?? this.currentAuthIndex;
                 this._setupClientDisconnectHandler(res, requestId);
 
                 this._getUsageStatsService()?.recordAttempt(
                     requestId,
-                    this.currentAuthIndex,
-                    this._getAccountNameForIndex(this.currentAuthIndex)
+                    messageQueueAuthIndex,
+                    this._getAccountNameForIndex(messageQueueAuthIndex)
                 );
-                this._forwardRequest(proxyRequest);
+                this._forwardRequest(proxyRequest, messageQueueAuthIndex);
                 const response = await messageQueue.dequeue();
 
                 if (response.event_type === "error") {
@@ -2412,14 +2449,16 @@ class RequestHandler {
                     this.currentAuthIndex,
                     proxyRequest.request_attempt_id
                 );
+                const messageQueueAuthIndex =
+                    this.connectionRegistry.getAuthIndexForRequest(requestId) ?? this.currentAuthIndex;
                 this._setupClientDisconnectHandler(res, requestId);
 
                 this._getUsageStatsService()?.recordAttempt(
                     requestId,
-                    this.currentAuthIndex,
-                    this._getAccountNameForIndex(this.currentAuthIndex)
+                    messageQueueAuthIndex,
+                    this._getAccountNameForIndex(messageQueueAuthIndex)
                 );
-                this._forwardRequest(proxyRequest);
+                this._forwardRequest(proxyRequest, messageQueueAuthIndex);
                 const response = await messageQueue.dequeue();
 
                 if (response.event_type === "error") {
@@ -2906,10 +2945,10 @@ class RequestHandler {
             // Record attempt before forwarding, so failed attempts are also counted
             this._getUsageStatsService()?.recordAttempt(
                 proxyRequest.request_id,
-                this.currentAuthIndex,
-                this._getAccountNameForIndex(this.currentAuthIndex)
+                currentQueueAuthIndex,
+                this._getAccountNameForIndex(currentQueueAuthIndex)
             );
-            this._forwardRequest(proxyRequest);
+            this._forwardRequest(proxyRequest, currentQueueAuthIndex);
             headerMessage = await currentQueue.dequeue();
 
             const headerStatus = Number(headerMessage?.status);
@@ -3210,11 +3249,11 @@ class RequestHandler {
             // This ensures failed attempts (e.g. 429 before any response) are also counted.
             this._getUsageStatsService()?.recordAttempt(
                 proxyRequest.request_id,
-                this.currentAuthIndex,
-                this._getAccountNameForIndex(this.currentAuthIndex)
+                currentQueueAuthIndex,
+                this._getAccountNameForIndex(currentQueueAuthIndex)
             );
             try {
-                this._forwardRequest(proxyRequest);
+                this._forwardRequest(proxyRequest, currentQueueAuthIndex);
 
                 const initialMessage = await currentQueue.dequeue(this.timeouts.FAKE_STREAM);
 
@@ -3696,7 +3735,7 @@ class RequestHandler {
             if (lowerName === "content-length") return;
 
             // Special handling for upload URL and redirects: point them back to this proxy
-            if ((lowerName === "x-goog-upload-url" || lowerName === "location") && value.includes("googleapis.com")) {
+            if (lowerName === "x-goog-upload-url" && value.includes("googleapis.com")) {
                 try {
                     const urlObj = new URL(value);
                     // Rewrite upload/redirect URLs to point to this proxy server
@@ -4299,11 +4338,11 @@ class RequestHandler {
         );
     }
 
-    _forwardRequest(proxyRequest) {
-        const connection = this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex);
+    _forwardRequest(proxyRequest, authIndex = this.currentAuthIndex) {
+        const connection = this.connectionRegistry.getConnectionByAuth(authIndex);
         if (connection) {
             this.logger.debug(
-                `[Request] Forwarding request #${proxyRequest.request_id} via connection for authIndex=${this.currentAuthIndex}` +
+                `[Request] Forwarding request #${proxyRequest.request_id} via connection for authIndex=${authIndex}` +
                     ` (attempt=${proxyRequest.request_attempt_id})`
             );
             connection.send(
@@ -4313,9 +4352,7 @@ class RequestHandler {
                 })
             );
         } else {
-            throw new Error(
-                `Unable to forward request: No WebSocket connection found for authIndex=${this.currentAuthIndex}`
-            );
+            throw new Error(`Unable to forward request: No WebSocket connection found for authIndex=${authIndex}`);
         }
     }
 

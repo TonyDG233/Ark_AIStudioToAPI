@@ -19,6 +19,10 @@ const {
 } = require("../utils/CustomErrors");
 
 const WS_INIT_TIMEOUT_MS = 120000;
+const FIREFOX_DOH_DISABLED_PREFS = {
+    "network.trr.mode": 5,
+    "network.trr.uri": "",
+};
 
 /**
  * Browser Manager Module
@@ -72,7 +76,7 @@ class BrowserManager {
         this._wsInitState = new Map();
 
         // Target URL for AI Studio app
-        this.targetUrl = "https://ai.studio/apps/fa9cb8e6-4d92-4fb6-a2b1-b947405c22ae";
+        this.targetUrl = "https://ai.studio/apps/7bfbb4ef-1e3b-4b46-a37f-37d79c771aa0";
 
         // Firefox/Camoufox does not use Chromium-style command line args.
         // We keep this empty; Camoufox has its own anti-fingerprinting optimizations built-in.
@@ -107,6 +111,7 @@ class BrowserManager {
             "network.dns.disablePrefetch": true, // Disable DNS prefetching
             "network.http.speculative-parallel-limit": 0, // Disable speculative connections
             "network.prefetch-next": false, // Disable link prefetching
+            ...FIREFOX_DOH_DISABLED_PREFS, // Disable DoH/TRR to respect system DNS/hosts
             "permissions.default.geo": 0, // 0 = Always deny geolocation
             "services.sync.enabled": false, // Disable Firefox Sync
             "toolkit.cosmeticAnimations.enabled": false, // Disable UI animations
@@ -1343,6 +1348,7 @@ class BrowserManager {
                 ...extraArgs.env,
             },
             executablePath: this.browserExecutablePath,
+            firefoxUserPrefs: FIREFOX_DOH_DISABLED_PREFS,
             headless: false,
             ...(proxyConfig ? { proxy: proxyConfig } : {}),
         });

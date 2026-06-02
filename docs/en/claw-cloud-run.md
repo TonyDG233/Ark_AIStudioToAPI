@@ -2,6 +2,11 @@
 
 This guide will help you deploy the `aistudio-to-api` service on [Claw Cloud Run](https://claw.cloud/).
 
+> [!IMPORTANT]
+> **Notice: Since May 11, 2026, 00:00 UTC, Claw Cloud Run has discontinued its product and related services, so this setup path is no longer available for new or running services. The instructions below are kept as a legacy reference.**
+>
+> Official announcement: https://question.run.claw.cloud/questions/10010000000003261
+
 ## 📦 Deployment Steps
 
 1. **Login**: Go to [https://us-west-1.run.claw.cloud](https://us-west-1.run.claw.cloud) and log in to your account.

@@ -2,6 +2,11 @@
 
 本指南将帮助你在 [Claw Cloud Run](https://claw.cloud/) 上部署 `aistudio-to-api` 服务。
 
+> [!IMPORTANT]
+> **说明：自 2026/05/11 00:00 UTC 起，Claw Cloud Run 已停止产品及相关服务，因此目前已无法按本教程新建或继续运行服务。以下内容为旧版部署教程，仅供参考。**
+>
+> 官方公告：https://question.run.claw.cloud/questions/10010000000003261
+
 ## 📦 部署步骤
 
 1. **登录**：前往 [https://us-west-1.run.claw.cloud](https://us-west-1.run.claw.cloud) 并登录你的账号。

@@ -172,12 +172,10 @@ If you need to access via a domain name or want unified management at the revers
 
 ### 🐾 Claw Cloud Run Deployment
 
-> ℹ **Claw Cloud Run announcement:** Claw Cloud Run has announced that it will discontinue its product and related services. All services will be discontinued on **May 11, 2026, 00:00 UTC**; export or back up your data before then. See the official announcement for details:
+> ℹ **Claw Cloud Run announcement:** Since **May 11, 2026, 00:00 UTC**, Claw Cloud Run has discontinued its product and related services. See the official announcement for details:
 > [Announcement](https://question.run.claw.cloud/questions/10010000000003261)
 
-Deploy directly on Claw Cloud Run, a fully managed container platform.
-
-> 📖 For detailed deployment instructions, see: [Deploy on Claw Cloud Run](docs/en/claw-cloud-run.md)
+> 📖 For the legacy deployment guide, see: [Deploy on Claw Cloud Run](docs/en/claw-cloud-run.md)
 
 ### 🦓 Zeabur Deployment
 

@@ -174,12 +174,10 @@ services:
 
 ### 🐾 Claw Cloud Run 部署
 
-> ℹ **Claw Cloud Run 公告：** Claw Cloud Run 已宣布停止产品及相关服务；所有服务将于 **2026/05/11 00:00 UTC** 停止，建议在此之前导出或备份数据。详情请参阅官方公告：
+> ℹ **Claw Cloud Run 公告：** 自 **2026/05/11 00:00 UTC** 起，Claw Cloud Run 已停止产品及相关服务。详情请参阅官方公告：
 > [公告](https://question.run.claw.cloud/questions/10010000000003261)
 
-支持直接部署到 Claw Cloud Run，全托管的容器平台。
-
-> 📖 详细部署说明请参阅：[部署到 Claw Cloud Run](docs/zh/claw-cloud-run.md)
+> 📖 旧版部署教程请参阅：[部署到 Claw Cloud Run](docs/zh/claw-cloud-run.md)
 
 ### 🦓 Zeabur 部署
 

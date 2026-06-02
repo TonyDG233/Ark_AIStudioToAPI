@@ -351,6 +351,12 @@ class RequestProcessor {
             }
         }
 
+        if (this._isUploadPathAndQuery(pathAndQuery)) {
+            const tempUrl = new URL(pathAndQuery, "http://dummy");
+            tempUrl.searchParams.delete("key");
+            pathAndQuery = tempUrl.pathname + tempUrl.search;
+        }
+
         let cleanPath = pathAndQuery.replace(/^\/+/, "");
         const method = requestSpec.method ? requestSpec.method.toUpperCase() : "GET";
 
@@ -383,7 +389,7 @@ class RequestProcessor {
 
     _buildRequestConfig(requestSpec, signal) {
         const config = {
-            headers: this._sanitizeHeaders(requestSpec.headers),
+            headers: this._sanitizeHeaders(requestSpec.headers, requestSpec),
             method: requestSpec.method,
             signal,
         };
@@ -397,12 +403,11 @@ class RequestProcessor {
                 try {
                     const bodyObj = JSON.parse(requestSpec.body);
 
-                    // --- Module 1: Image/Embedding/TTS Model Filtering ---
-                    // These models do NOT support: tools, thinkingConfig, systemInstruction, response_mime_type
+                    // --- Module 1: Embedding/TTS Model Filtering ---
                     const isImageModel = requestSpec.path.includes("-image") || requestSpec.path.includes("imagen");
                     const isEmbeddingModel = requestSpec.path.includes("embedding");
                     const isTtsModel = requestSpec.path.includes("tts");
-                    if (isImageModel || isEmbeddingModel || isTtsModel) {
+                    if (isEmbeddingModel || isTtsModel) {
                         // Remove tools
                         const incompatibleKeys = ["toolConfig", "tool_config", "toolChoice", "tools"];
                         incompatibleKeys.forEach(key => {
@@ -448,15 +453,17 @@ class RequestProcessor {
                     // --- Module 3: Robotics Model Filtering ---
                     const isComputerUseModel = requestSpec.path.includes("computer-use");
                     const isRoboticsModel = requestSpec.path.includes("robotics");
-                    if (isComputerUseModel || isRoboticsModel) {
-                        if (bodyObj.generationConfig?.responseModalities) {
-                            delete bodyObj.generationConfig.responseModalities;
-                        }
+                    if (isImageModel || isComputerUseModel || isRoboticsModel) {
                         if (bodyObj.generationConfig?.responseMimeType) {
                             delete bodyObj.generationConfig.responseMimeType;
                         }
                         if (bodyObj.generationConfig?.responseJsonSchema) {
                             delete bodyObj.generationConfig.responseJsonSchema;
+                        }
+                    }
+                    if (isComputerUseModel || isRoboticsModel) {
+                        if (bodyObj.generationConfig?.responseModalities) {
+                            delete bodyObj.generationConfig.responseModalities;
                         }
                     }
 
@@ -535,7 +542,7 @@ class RequestProcessor {
         return config;
     }
 
-    _sanitizeHeaders(headers) {
+    _sanitizeHeaders(headers, requestSpec = {}) {
         const sanitized = { ...headers };
         // Follow BuildProxy's forbidden list exactly
         const forbiddenHeaders = [
@@ -551,7 +558,21 @@ class RequestProcessor {
         ];
 
         forbiddenHeaders.forEach(h => delete sanitized[h]);
+        if (this._isUploadRequestSpec(requestSpec)) {
+            delete sanitized.authorization;
+            delete sanitized["x-api-key"];
+            delete sanitized["x-goog-api-key"];
+        }
         return sanitized;
+    }
+
+    _isUploadRequestSpec(requestSpec = {}) {
+        const path = String(requestSpec.url || requestSpec.path || "").toLowerCase();
+        return this._isUploadPathAndQuery(path);
+    }
+
+    _isUploadPathAndQuery(path) {
+        return path.includes("/upload/");
     }
 
     cancelOperation(operationId, requestAttemptId) {
@@ -828,7 +849,7 @@ class ProxySystem extends EventTarget {
         const headerMap = {};
         response.headers.forEach((v, k) => {
             const lowerKey = k.toLowerCase();
-            if ((lowerKey === "location" || lowerKey === "x-goog-upload-url") && v.includes("googleapis.com")) {
+            if (lowerKey === "x-goog-upload-url" && v.includes("googleapis.com")) {
                 try {
                     const urlObj = new URL(v);
                     const host = proxyHost || location.host;
