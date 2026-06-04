@@ -207,6 +207,126 @@ class BrowserManager {
         }
     }
 
+    _isCriticalPageError(error) {
+        const msg = error?.message || "";
+        return (
+            msg.includes("Execution context was destroyed") ||
+            msg.includes("Target page, context or browser has been closed") ||
+            msg.includes("Protocol error") ||
+            msg.includes("Navigation failed because page was closed")
+        );
+    }
+
+    _throwIfContextInitAborted(authIndex, isBackgroundTask = false, logPrefix = null, action = "Context init") {
+        if (this.abortedContexts.has(authIndex)) {
+            if (logPrefix) {
+                this.logger.info(`${logPrefix} ${action} aborted (context marked for deletion)`);
+            }
+            throw new ContextAbortedError(authIndex, "marked for deletion");
+        }
+
+        if (isBackgroundTask && this._backgroundPreloadAbort) {
+            if (logPrefix) {
+                this.logger.info(`${logPrefix} ${action} aborted (background preload aborted)`);
+            }
+            throw new ContextAbortedError(authIndex, "background preload aborted");
+        }
+    }
+
+    async _clickButtonByTextIfVisible(page, text, logPrefix = "[Browser]", debugName = "button") {
+        try {
+            // Use DOM operation to find and click button
+            const clicked = await page.evaluate(text => {
+                // eslint-disable-next-line no-undef
+                const buttons = document.querySelectorAll("button");
+                for (const btn of buttons) {
+                    // Check if the element occupies space (simple visibility check)
+                    const rect = btn.getBoundingClientRect();
+                    const isVisible = rect.width > 0 && rect.height > 0;
+
+                    if (isVisible) {
+                        const btnText = (btn.innerText || "").trim();
+                        if (btnText === text) {
+                            btn.click();
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }, text);
+
+            return clicked;
+        } catch (error) {
+            // Element not visible or doesn't exist is expected here,
+            // but propagate clearly critical browser/page issues.
+            if (error && error.message) {
+                const msg = error.message;
+                if (this._isCriticalPageError(error)) {
+                    throw error;
+                }
+                if (this.logger && typeof this.logger.debug === "function") {
+                    this.logger.debug(`${logPrefix} Ignored error while checking ${debugName}: ${msg}`);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    async _clickLaunchButtonIfVisible(page, logPrefix = "[Browser]") {
+        try {
+            this.logger.debug(`${logPrefix} 🔍 Checking for Launch button...`);
+
+            const clicked = await page.evaluate(() => {
+                const isVisible = element => {
+                    const rect = element.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                };
+                const getText = element => (element.innerText || element.textContent || "").trim();
+                const hasLaunchText = element => getText(element).includes("Launch");
+                const clickTarget = element => {
+                    const target = element.closest("button, [role='button']") || element;
+                    target.click();
+                    return true;
+                };
+
+                // eslint-disable-next-line no-undef
+                const controls = Array.from(document.querySelectorAll("button, div[role='button']"));
+                for (const control of controls) {
+                    if (!isVisible(control)) continue;
+
+                    const ariaLabel = control.getAttribute("aria-label") || "";
+                    if (hasLaunchText(control) || ariaLabel.includes("Launch")) {
+                        return clickTarget(control);
+                    }
+                }
+
+                // eslint-disable-next-line no-undef
+                const spans = Array.from(document.querySelectorAll("button span, [role='button'] span"));
+                for (const span of spans) {
+                    if (!isVisible(span)) continue;
+                    if (hasLaunchText(span)) {
+                        return clickTarget(span);
+                    }
+                }
+
+                return false;
+            });
+
+            if (clicked) {
+                this.logger.info(`${logPrefix} Launch button clicked successfully`);
+                return true;
+            }
+        } catch (error) {
+            if (this._isCriticalPageError(error)) {
+                throw error;
+            }
+            this.logger.warn(`${logPrefix} ⚠️ Error while checking for Launch button: ${error.message}`);
+        }
+
+        return false;
+    }
+
     /**
      * Helper: Wait for WebSocket initialization with log monitoring
      * Supports abort for background tasks and context deletion
@@ -224,26 +344,18 @@ class BrowserManager {
         authIndex = -1,
         isBackgroundTask = false
     ) {
-        this.logger.info(`${logPrefix} ⏳ Waiting for WebSocket initialization (timeout: ${timeout / 1000}s)...`);
+        this.logger.info(
+            `${logPrefix} ⏳ Waiting for Continue/Launch button or WebSocket initialization (timeout: ${timeout / 1000}s)...`
+        );
 
         const startTime = Date.now();
         const checkInterval = 1000; // Check every 1 second
+        let continueClicked = false;
+        let iteration = 0;
 
         try {
             while (Date.now() - startTime < timeout) {
-                // Check if this specific context was marked for abort
-                if (this.abortedContexts.has(authIndex)) {
-                    this.logger.info(`${logPrefix} WebSocket wait aborted (context marked for deletion)`);
-                    throw new ContextAbortedError(authIndex, "marked for deletion");
-                }
-
-                // Check if background preload was aborted (only for background tasks)
-                if (isBackgroundTask && this._backgroundPreloadAbort) {
-                    this.logger.info(`${logPrefix} WebSocket wait aborted (background preload aborted)`);
-                    throw new Error(
-                        `Context initialization aborted for index ${authIndex} (background preload aborted)`
-                    );
-                }
+                this._throwIfContextInitAborted(authIndex, isBackgroundTask, logPrefix, "WebSocket wait");
 
                 // Read state fresh each iteration
                 const state = this._wsInitState.get(authIndex);
@@ -257,6 +369,23 @@ class BrowserManager {
                 if (state && state.failed) {
                     this.logger.warn(`${logPrefix} Initialization failed`);
                     return false;
+                }
+
+                if (!continueClicked) {
+                    const continueText = "Continue to the app";
+                    continueClicked = await this._clickButtonByTextIfVisible(
+                        page,
+                        continueText,
+                        logPrefix,
+                        `popup "${continueText}"`
+                    );
+                    if (continueClicked) {
+                        this.logger.info(`${logPrefix} Found "${continueText}" button, clicking...`);
+                    }
+                }
+
+                if (iteration % 5 === 0) {
+                    await this._clickLaunchButtonIfVisible(page, logPrefix);
                 }
 
                 // Check for page errors
@@ -277,6 +406,7 @@ class BrowserManager {
                     }
                 }
                 // Wait before next check
+                iteration++;
                 await page.waitForTimeout(checkInterval);
             }
 
@@ -284,8 +414,8 @@ class BrowserManager {
             this.logger.error(`${logPrefix} ⏱️ WebSocket initialization timeout after ${timeout / 1000}s`);
             return false;
         } catch (error) {
-            // If it's an abort error, re-throw it so the caller can handle it properly
-            if (isContextAbortedError(error)) {
+            // Re-throw aborts and critical page/browser errors so callers keep the original failure reason.
+            if (isContextAbortedError(error) || this._isCriticalPageError(error)) {
                 throw error;
             }
             // For other errors, log and return false
@@ -775,171 +905,6 @@ class BrowserManager {
 
         if (currentUrl === "about:blank") {
             throw new Error("🚨 Page load failed (about:blank), possibly network timeout or browser crash.");
-        }
-    }
-
-    /**
-     * Helper: Handle various popups with intelligent detection
-     * Uses short polling instead of long hard-coded timeouts
-     * @param {Page} page - The page object to check for popups
-     * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
-     */
-    async _handlePopups(page, logPrefix = "[Browser]") {
-        this.logger.debug(`${logPrefix} 🔍 Starting intelligent popup detection (max 6s)...`);
-
-        const popupConfigs = [
-            {
-                logFound: `${logPrefix} Found "Continue to the app" button, clicking...`,
-                name: "Continue to the app",
-                text: "Continue to the app",
-            },
-        ];
-
-        // Polling-based detection with smart exit conditions
-        // - Initial wait: give popups time to render after page load
-        // - Consecutive idle tracking: exit after N consecutive iterations with no new popups
-        const maxIterations = 12; // Max polling iterations
-        const pollInterval = 500; // Interval between polls (ms)
-        const minIterations = 6; // Min iterations (3s), ensure slow popups have time to load
-        const idleThreshold = 4; // Exit after N consecutive iterations with no new popups
-        const handledPopups = new Set();
-        let consecutiveIdleCount = 0; // Counter for consecutive idle iterations
-
-        for (let i = 0; i < maxIterations; i++) {
-            let foundAny = false;
-
-            for (const popup of popupConfigs) {
-                if (handledPopups.has(popup.name)) continue;
-
-                try {
-                    // Use DOM operation to find and click button
-                    const clicked = await page.evaluate(text => {
-                        // eslint-disable-next-line no-undef
-                        const buttons = document.querySelectorAll("button");
-                        for (const btn of buttons) {
-                            // Check if the element occupies space (simple visibility check)
-                            const rect = btn.getBoundingClientRect();
-                            const isVisible = rect.width > 0 && rect.height > 0;
-
-                            if (isVisible) {
-                                const btnText = (btn.innerText || "").trim();
-                                if (btnText === text) {
-                                    btn.click();
-                                    return true;
-                                }
-                            }
-                        }
-                        return false;
-                    }, popup.text);
-
-                    if (clicked) {
-                        this.logger.info(popup.logFound);
-                        handledPopups.add(popup.name);
-                        foundAny = true;
-
-                        // "Continue to the app" confirms entry, exit popup detection early
-                        if (popup.name === "Continue to the app") {
-                            return;
-                        }
-
-                        // Short pause after clicking to let next popup appear
-                        await page.waitForTimeout(800);
-                    }
-                } catch (error) {
-                    // Element not visible or doesn't exist is expected here,
-                    // but propagate clearly critical browser/page issues.
-                    if (error && error.message) {
-                        const msg = error.message;
-                        if (
-                            msg.includes("Execution context was destroyed") ||
-                            msg.includes("Target page, context or browser has been closed") ||
-                            msg.includes("Protocol error") ||
-                            msg.includes("Navigation failed because page was closed")
-                        ) {
-                            throw error;
-                        }
-                        if (this.logger && typeof this.logger.debug === "function") {
-                            this.logger.debug(
-                                `${logPrefix} Ignored error while checking popup "${popup.name}": ${msg}`
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Update consecutive idle counter
-            if (foundAny) {
-                consecutiveIdleCount = 0; // Found popup, reset counter
-            } else {
-                consecutiveIdleCount++;
-            }
-
-            // Exit conditions:
-            // 1. Must have completed minimum iterations (ensure slow popups have time to load)
-            // 2. Consecutive idle count exceeds threshold (no new popups appearing)
-            if (i >= minIterations - 1 && consecutiveIdleCount >= idleThreshold) {
-                this.logger.debug(
-                    `${logPrefix} Popup detection complete (${i + 1} iterations, ${handledPopups.size} popups handled)`
-                );
-                break;
-            }
-
-            if (i < maxIterations - 1) {
-                await page.waitForTimeout(pollInterval);
-            }
-        }
-
-        // Log final summary
-        if (handledPopups.size === 0) {
-            this.logger.info(`${logPrefix} No popups detected during scan`);
-        } else {
-            this.logger.info(
-                `${logPrefix} Popup detection complete: handled ${handledPopups.size} popup(s) - ${Array.from(handledPopups).join(", ")}`
-            );
-        }
-    }
-
-    /**
-     * Helper: Try to click Launch button if it exists on the page
-     * This is not a popup, but a page button that may need to be clicked
-     * @param {Page} page - The page object to check for Launch button
-     * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
-     */
-    async _tryClickLaunchButton(page, logPrefix = "[Browser]") {
-        try {
-            this.logger.debug(`${logPrefix} 🔍 Checking for Launch button...`);
-
-            // Try to find Launch button with multiple selectors
-            const launchSelectors = [
-                'button:text("Launch")',
-                'button:has-text("Launch")',
-                'button[aria-label*="Launch"]',
-                'button span:has-text("Launch")',
-                'div[role="button"]:has-text("Launch")',
-            ];
-
-            let clicked = false;
-            for (const selector of launchSelectors) {
-                try {
-                    const element = page.locator(selector).first();
-                    if (await element.isVisible({ timeout: 2000 })) {
-                        this.logger.debug(`${logPrefix} Found Launch button with selector: ${selector}`);
-                        await element.click({ force: true, timeout: 5000 });
-                        this.logger.info(`${logPrefix} Launch button clicked successfully`);
-                        clicked = true;
-                        await page.waitForTimeout(1000);
-                        break;
-                    }
-                } catch (e) {
-                    // Continue to next selector
-                }
-            }
-
-            if (!clicked) {
-                this.logger.info(`${logPrefix} No Launch button found`);
-            }
-        } catch (error) {
-            this.logger.warn(`${logPrefix} ⚠️ Error while checking for Launch button: ${error.message}`);
         }
     }
 
@@ -2041,14 +2006,7 @@ class BrowserManager {
 
         try {
             // Check if this context has been marked for abort before starting
-            if (this.abortedContexts.has(authIndex)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
-
-            // Check if background preload was aborted (only for background tasks)
-            if (isBackgroundTask && this._backgroundPreloadAbort) {
-                throw new ContextAbortedError(authIndex, "background preload aborted");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             // Initialize per-context WebSocket state to ensure clean state for this context
             // Each context gets its own state object, preventing cross-contamination
@@ -2066,9 +2024,7 @@ class BrowserManager {
             const randomHeight = 1080 + Math.floor(Math.random() * 50);
 
             // Check abort status before expensive operations
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             context = await this.browser.newContext({
                 deviceScaleFactor: 1,
@@ -2078,9 +2034,7 @@ class BrowserManager {
             });
 
             // Check abort status after context creation
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             // Inject Privacy Script immediately after context creation
             const privacyScript = this._getPrivacyProtectionScript(authIndex);
@@ -2155,31 +2109,16 @@ class BrowserManager {
             });
 
             // Check abort status before navigation (most time-consuming part)
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             await this._navigateAndWakeUpPage(page, `[Context#${authIndex}]`);
 
             // Check abort status after navigation
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             await this._checkPageStatusAndErrors(page, `[Context#${authIndex}]`, authIndex);
 
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
-
-            await this._handlePopups(page, `[Context#${authIndex}]`);
-
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
-
-            // Try to click Launch button if it exists (not a popup, but a page button)
-            await this._tryClickLaunchButton(page, `[Context#${authIndex}]`);
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             // Wait for WebSocket initialization (no retry)
             // Check if initialization already succeeded (console listener may have detected it)
@@ -2203,9 +2142,7 @@ class BrowserManager {
             }
 
             // Final check before adding to contexts map
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             // Save to contexts map - with atomic abort check to prevent race condition
             // between the check above and actually adding to the map
@@ -2216,7 +2153,7 @@ class BrowserManager {
                     page,
                 });
             } else {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
+                this._throwIfContextInitAborted(authIndex, isBackgroundTask);
             }
 
             // Update auth file
@@ -2530,12 +2467,6 @@ class BrowserManager {
 
             // Check for cookie expiration, region restrictions, and other errors
             await this._checkPageStatusAndErrors(page, "[Reconnect]", targetAuthIndex);
-
-            // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
-            await this._handlePopups(page, "[Reconnect]");
-
-            // Try to click Launch button if it exists (not a popup, but a page button)
-            await this._tryClickLaunchButton(page, "[Reconnect]");
 
             // Wait for WebSocket initialization (no retry)
             // Check if initialization already succeeded (console listener may have detected it)
