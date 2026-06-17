@@ -76,7 +76,7 @@ class BrowserManager {
         this._wsInitState = new Map();
 
         // Target URL for AI Studio app
-        this.targetUrl = "https://ai.studio/apps/7bfbb4ef-1e3b-4b46-a37f-37d79c771aa0";
+        this.targetUrl = "https://ai.studio/apps/b14eb99d-655e-4d29-ba95-218a8c086e07";
 
         // Firefox/Camoufox does not use Chromium-style command line args.
         // We keep this empty; Camoufox has its own anti-fingerprinting optimizations built-in.
@@ -119,28 +119,6 @@ class BrowserManager {
             "toolkit.telemetry.enabled": false, // Disable telemetry
             "toolkit.telemetry.unified": false, // Disable unified telemetry
         };
-
-        if (this.config.browserExecutablePath) {
-            this.browserExecutablePath = this.config.browserExecutablePath;
-        } else {
-            const platform = os.platform();
-            if (platform === "linux") {
-                this.browserExecutablePath = path.join(process.cwd(), "camoufox-linux", "camoufox");
-            } else if (platform === "win32") {
-                this.browserExecutablePath = path.join(process.cwd(), "camoufox", "camoufox.exe");
-            } else if (platform === "darwin") {
-                this.browserExecutablePath = path.join(
-                    process.cwd(),
-                    "camoufox-macos",
-                    "Camoufox.app",
-                    "Contents",
-                    "MacOS",
-                    "camoufox"
-                );
-            } else {
-                throw new Error(`Unsupported operating system: ${platform}`);
-            }
-        }
     }
 
     get currentAuthIndex() {
@@ -149,6 +127,25 @@ class BrowserManager {
 
     set currentAuthIndex(value) {
         this._currentAuthIndex = value;
+    }
+
+    _getBrowserExecutablePath() {
+        if (this.config.browserExecutablePath) {
+            return this.config.browserExecutablePath;
+        }
+
+        const platform = os.platform();
+        if (platform === "linux") {
+            return path.join(process.cwd(), "camoufox-linux", "camoufox");
+        }
+        if (platform === "win32") {
+            return path.join(process.cwd(), "camoufox", "camoufox.exe");
+        }
+        if (platform === "darwin") {
+            return path.join(process.cwd(), "camoufox-macos", "Camoufox.app", "Contents", "MacOS", "camoufox");
+        }
+
+        throw new Error(`Unsupported operating system: ${platform}`);
     }
 
     /**
@@ -351,6 +348,7 @@ class BrowserManager {
         const startTime = Date.now();
         const checkInterval = 1000; // Check every 1 second
         let continueClicked = false;
+        let skipClicked = false;
         let iteration = 0;
 
         try {
@@ -381,6 +379,19 @@ class BrowserManager {
                     );
                     if (continueClicked) {
                         this.logger.info(`${logPrefix} Found "${continueText}" button, clicking...`);
+                    }
+                }
+
+                if (!skipClicked) {
+                    const skipText = "Skip";
+                    skipClicked = await this._clickButtonByTextIfVisible(
+                        page,
+                        skipText,
+                        logPrefix,
+                        `popup "${skipText}"`
+                    );
+                    if (skipClicked) {
+                        this.logger.info(`${logPrefix} Found "${skipText}" button, clicking...`);
                     }
                 }
 
@@ -1007,7 +1018,15 @@ class BrowserManager {
                             "div.cdk-global-overlay-wrapper",
                         ];
 
-                        const targetTexts = ["Reload", "Retry", "Got it", "Dismiss", "Not now", "Continue to the app"];
+                        const targetTexts = [
+                            "Reload",
+                            "Retry",
+                            "Got it",
+                            "Dismiss",
+                            "Not now",
+                            "Continue to the app",
+                            "Skip",
+                        ];
 
                         // Remove passive blockers
                         blockers.forEach(selector => {
@@ -1296,8 +1315,9 @@ class BrowserManager {
 
     async launchBrowserForVNC(extraArgs = {}) {
         this.logger.info("🚀 [VNC] Launching a new, separate, headful browser instance for VNC session...");
-        if (!fs.existsSync(this.browserExecutablePath)) {
-            throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
+        const browserExecutablePath = this._getBrowserExecutablePath();
+        if (!fs.existsSync(browserExecutablePath)) {
+            throw new Error(`Browser executable not found at path: ${browserExecutablePath}`);
         }
 
         const proxyConfig = parseProxyFromEnv();
@@ -1312,7 +1332,7 @@ class BrowserManager {
                 ...process.env,
                 ...extraArgs.env,
             },
-            executablePath: this.browserExecutablePath,
+            executablePath: browserExecutablePath,
             firefoxUserPrefs: FIREFOX_DOH_DISABLED_PREFS,
             headless: false,
             ...(proxyConfig ? { proxy: proxyConfig } : {}),
@@ -1457,13 +1477,14 @@ class BrowserManager {
 
         const proxyConfig = parseProxyFromEnv();
         this.logger.info("🚀 [Browser] Launching main browser instance...");
-        if (!fs.existsSync(this.browserExecutablePath)) {
+        const browserExecutablePath = this._getBrowserExecutablePath();
+        if (!fs.existsSync(browserExecutablePath)) {
             this._currentAuthIndex = -1;
-            throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
+            throw new Error(`Browser executable not found at path: ${browserExecutablePath}`);
         }
         this.browser = await firefox.launch({
             args: this.launchArgs,
-            executablePath: this.browserExecutablePath,
+            executablePath: browserExecutablePath,
             firefoxUserPrefs: this.firefoxUserPrefs,
             headless: true,
             ...(proxyConfig ? { proxy: proxyConfig } : {}),
