@@ -398,6 +398,37 @@
                                 </span>
                                 <span class="value">{{ activeContextsDisplay }}</span>
                             </div>
+                            <!-- Startup Keepalive -->
+                            <div v-if="state.startupKeepaliveEnabled" class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+                                    </svg>
+                                    <span>
+                                        {{ t("startupKeepalive") }}
+                                        <EnvVarTooltip env-var="ENABLE_STARTUP_KEEPALIVE" doc-section="proxy-config" />
+                                    </span>
+                                </span>
+                                <span class="value" :style="getKeepaliveStateStyle(state.startupKeepaliveState)">
+                                    {{
+                                        getKeepaliveStateText(
+                                            state.startupKeepaliveState,
+                                            state.startupKeepaliveProgress
+                                        )
+                                    }}
+                                </span>
+                            </div>
                         </div>
                     </div>
 
@@ -3751,8 +3782,12 @@ const state = reactive({
     nextSwitchTimestamp: -1,
     releaseUrl: null,
     safetySettingsThreshold: "OFF",
-    selectedAccounts: new Set(), // Selected account indices
+    selectedAccounts: new Set(),
     serviceConnected: false,
+    // Selected account indices
+    startupKeepaliveEnabled: false,
+    startupKeepaliveProgress: { current: 0, total: 0 },
+    startupKeepaliveState: "inactive",
     streamingModeReal: false,
     // theme: handled by useTheme
     usageCount: 0,
@@ -3798,6 +3833,35 @@ const activeContextsDisplay = computed(() => {
     const max = state.maxContexts;
     return max === 0 ? `${active} / ∞` : `${active} / ${max}`;
 });
+
+const getKeepaliveStateStyle = keepaliveState => {
+    switch (keepaliveState) {
+        case "running":
+            return { color: "#3498db", fontWeight: "bold" };
+        case "completed":
+            return { color: "#2ecc71", fontWeight: "bold" };
+        case "failed":
+            return { color: "#e74c3c", fontWeight: "bold" };
+        default:
+            return { color: "#95a5a6" };
+    }
+};
+
+const getKeepaliveStateText = (keepaliveState, progress) => {
+    switch (keepaliveState) {
+        case "running":
+            if (progress && progress.total > 0) {
+                return `${t("running")} (${progress.current}/${progress.total})`;
+            }
+            return t("running");
+        case "completed":
+            return t("completed");
+        case "failed":
+            return t("failed");
+        default:
+            return t("inactive");
+    }
+};
 
 const isBusy = computed(() => state.isSwitchingAccount || state.isSystemBusy);
 
@@ -4493,6 +4557,9 @@ const updateStatus = data => {
     state.maxContexts = data.status.maxContexts ?? 1;
     state.maxRetries = data.status.maxRetries ?? 3;
     state.safetySettingsThreshold = data.status.safetySettingsThreshold || "OFF";
+    state.startupKeepaliveEnabled = isEnabled(data.status.startupKeepaliveEnabled);
+    state.startupKeepaliveProgress = data.status.startupKeepaliveProgress || { current: 0, total: 0 };
+    state.startupKeepaliveState = data.status.startupKeepaliveState || "inactive";
 
     const validIndices = new Set(state.accountDetails.map(acc => acc.index));
     for (const idx of state.selectedAccounts) {

@@ -637,6 +637,11 @@ class RequestHandler {
             this.browserManager.notifyUserActivity();
         }
 
+        // Reset the auto-switch timer to prevent switching during active usage
+        if (this.serverSystem && typeof this.serverSystem.updateAutoSwitchTimer === "function") {
+            this.serverSystem.updateAutoSwitchTimer(true);
+        }
+
         return true;
     }
 

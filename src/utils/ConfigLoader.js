@@ -27,6 +27,7 @@ class ConfigLoader {
             checkUpdate: true,
             enableAuthUpdate: true,
             enableAutoSwitch: false,
+            enableStartupKeepalive: false,
             enableUsageStats: true,
             failureThreshold: 3,
             fakeStreamTimeoutMs: 300000,
@@ -127,6 +128,8 @@ class ConfigLoader {
             config.enableAuthUpdate = process.env.ENABLE_AUTH_UPDATE.toLowerCase() !== "false";
         if (process.env.ENABLE_AUTO_SWITCH)
             config.enableAutoSwitch = process.env.ENABLE_AUTO_SWITCH.toLowerCase() === "true";
+        if (process.env.ENABLE_STARTUP_KEEPALIVE)
+            config.enableStartupKeepalive = process.env.ENABLE_STARTUP_KEEPALIVE.toLowerCase() === "true";
         if (process.env.AUTO_SWITCH_INTERVAL_HOURS)
             config.autoSwitchIntervalHours =
                 Math.max(0.1, parseFloat(process.env.AUTO_SWITCH_INTERVAL_HOURS)) || config.autoSwitchIntervalHours;
@@ -214,6 +217,7 @@ class ConfigLoader {
         this.logger.info(`  Check Update: ${config.checkUpdate}`);
         this.logger.info(`  Default Safety Threshold: ${config.safetySettingsThreshold}`);
         this.logger.info(`  Auto Update Auth: ${config.enableAuthUpdate}`);
+        this.logger.info(`  Startup Keepalive Cycle: ${config.enableStartupKeepalive ? "Enabled" : "Disabled"}`);
         this.logger.info(`  Usage Stats: ${config.enableUsageStats}`);
         this.logger.info(`  Max Contexts: ${config.maxContexts === 0 ? "Unlimited" : config.maxContexts}`);
         this.logger.info(
