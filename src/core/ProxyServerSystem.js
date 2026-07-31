@@ -114,6 +114,8 @@ class ProxyServerSystem extends EventEmitter {
         this.webRoutes = new WebRoutes(this);
         this.autoSwitchTimer = null;
         this.nextSwitchTimestamp = null;
+        this.startupKeepaliveState = "inactive";
+        this.startupKeepaliveProgress = { current: 0, total: 0 };
     }
 
     async start(initialAuthIndex = null) {
@@ -196,12 +198,19 @@ class ProxyServerSystem extends EventEmitter {
 
         // Start the auto-switch timer if enabled
         this.updateAutoSwitchTimer();
+
+        // Run background startup keepalive cycle if enabled
+        if (this.config.enableStartupKeepalive) {
+            this.runStartupKeepaliveCycle().catch(error => {
+                this.logger.error(`[System] Error in startup keepalive cycle: ${error.message}`);
+            });
+        }
     }
 
     // ========================================================================
     // MODIFICATION: Start of auto-account-switching logic
     // ========================================================================
-    updateAutoSwitchTimer() {
+    updateAutoSwitchTimer(quiet = false) {
         // Always clear existing timer before starting a new one
         if (this.autoSwitchTimer) {
             clearInterval(this.autoSwitchTimer);
@@ -213,21 +222,31 @@ class ProxyServerSystem extends EventEmitter {
 
         // Conditions to start the timer
         if (!this.config.enableAutoSwitch) {
-            this.logger.info("[System] ⏰ Auto-account-switching is disabled by config.");
+            if (!quiet) {
+                this.logger.info("[System] ⏰ Auto-account-switching is disabled by config.");
+            }
             return;
         }
 
         if (rotationIndices.length <= 1) {
-            this.logger.info("[System] ⏰ Auto-account-switching is disabled, not enough accounts to rotate.");
+            if (!quiet) {
+                this.logger.info("[System] ⏰ Auto-account-switching is disabled, not enough accounts to rotate.");
+            }
             return;
         }
 
         const interval = this.config.autoSwitchIntervalHours * 60 * 60 * 1000;
         this.nextSwitchTimestamp = Date.now() + interval;
 
-        this.logger.info(
-            `[System] ⏰ Started auto-account-switching timer, interval: ${this.config.autoSwitchIntervalHours} hours.`
-        );
+        if (!quiet) {
+            this.logger.info(
+                `[System] ⏰ Started auto-account-switching timer, interval: ${this.config.autoSwitchIntervalHours} hours.`
+            );
+        } else {
+            this.logger.debug(
+                `[System] ⏰ Reset auto-account-switching timer, next switch scheduled in: ${this.config.autoSwitchIntervalHours} hours.`
+            );
+        }
 
         this.autoSwitchTimer = setInterval(async () => {
             this.logger.info(`[System] ⏰ Triggering scheduled account switch...`);
@@ -241,18 +260,96 @@ class ProxyServerSystem extends EventEmitter {
                 } else {
                     this.logger.warn(`[System] ⚠️ Scheduled switch not executed: ${result.reason}`);
                     // If switch fails, restart the timer which will re-evaluate conditions
-                    this.updateAutoSwitchTimer();
+                    this.updateAutoSwitchTimer(true);
                 }
             } catch (error) {
                 this.logger.error(`[System] ❌ Scheduled switch failed: ${error.message}`);
                 // Also restart on critical error
-                this.updateAutoSwitchTimer();
+                this.updateAutoSwitchTimer(true);
             }
         }, interval);
     }
     // ========================================================================
     // MODIFICATION: End of auto-account-switching logic
     // ========================================================================
+
+    /**
+     * Run background keepalive initialization cycle for all accounts on startup
+     */
+    async runStartupKeepaliveCycle() {
+        if (!this.config.enableStartupKeepalive) {
+            this.startupKeepaliveState = "inactive";
+            return;
+        }
+
+        const rotationIndices = this.authSource.getRotationIndices();
+        if (rotationIndices.length === 0) {
+            this.startupKeepaliveState = "inactive";
+            return;
+        }
+
+        // Determine chronological order starting from the active account index
+        const currentAuthIndex = this.browserManager.currentAuthIndex;
+        const currentCanonical = currentAuthIndex >= 0 ? this.authSource.getCanonicalIndex(currentAuthIndex) : null;
+        const startPos = currentCanonical !== null ? Math.max(rotationIndices.indexOf(currentCanonical), 0) : 0;
+        const orderedIndices = [];
+        for (let i = 0; i < rotationIndices.length; i++) {
+            orderedIndices.push(rotationIndices[(startPos + i) % rotationIndices.length]);
+        }
+
+        this.logger.info(
+            `[System] ⏰ Starting background startup keepalive cycle for ${rotationIndices.length} accounts...`
+        );
+        this.startupKeepaliveState = "running";
+
+        this.startupKeepaliveProgress = {
+            current: 0,
+            total: orderedIndices.length,
+        };
+
+        // Run through all accounts sequentially in rotation-aligned order
+        for (let i = 0; i < orderedIndices.length; i++) {
+            const authIndex = orderedIndices[i];
+
+            // If already initialized in active contexts, skip it (already logged in and active)
+            if (this.browserManager.contexts.has(authIndex)) {
+                this.logger.info(`[System] ⏰ Account #${authIndex} is already running/active in the pool, skipping.`);
+                this.startupKeepaliveProgress.current = i + 1;
+                continue;
+            }
+
+            this.logger.info(
+                `[System] ⏰ Starting keepalive initialization for account #${authIndex} (${i + 1}/${orderedIndices.length})...`
+            );
+            try {
+                // Initialize context as background task (isBackgroundTask = true)
+                // This points the page to AI Studio and waits for WebSocket login/connection
+                await this.browserManager._initializeContext(authIndex, true);
+                this.logger.info(`[System] ⏰ Account #${authIndex} successfully initialized and kept alive.`);
+
+                // Let things settle, then close context to free memory
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                await this.browserManager.closeContext(authIndex);
+                this.logger.info(`[System] ⏰ Account #${authIndex} context closed to free memory.`);
+            } catch (error) {
+                this.logger.error(`[System] ❌ Failed to keep alive account #${authIndex}: ${error.message}`);
+                // Ensure context is closed in case of failure
+                try {
+                    await this.browserManager.closeContext(authIndex);
+                } catch (closeErr) {
+                    // ignore
+                }
+            }
+
+            this.startupKeepaliveProgress.current = i + 1;
+
+            // Wait 3 seconds between accounts to avoid overloading CPU/network
+            await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+
+        this.logger.info("[System] ⏰ Background startup keepalive cycle completed successfully!");
+        this.startupKeepaliveState = "completed";
+    }
 
     _createAuthMiddleware() {
         return (req, res, next) => {
