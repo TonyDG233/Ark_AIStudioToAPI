@@ -273,7 +273,7 @@ Usage:
 | `MAX_CONTEXTS`                  | Maximum number of accounts that can be logged in simultaneously. Accounts logged in simultaneously can switch faster without re-login. Higher values consume more memory (approx: 1 account ~700MB, 2 accounts ~950MB, 3 accounts ~1100MB). Set to `0` for unlimited. | `1`       |
 | `HTTP_PROXY`                    | HTTP proxy address for accessing Google services.                                                                                                                                                                                                                     | None      |
 | `HTTPS_PROXY`                   | HTTPS proxy address for accessing Google services.                                                                                                                                                                                                                    | None      |
-| `NO_PROXY`                      | Comma-separated list of addresses to bypass the proxy. The project automatically bypasses local addresses (localhost, 127.0.0.1 and 0.0.0.0), so manual local bypass configuration is usually not required.                                                           | None      |
+| `NO_PROXY`                      | Comma-separated list of addresses to bypass the proxy. The project automatically bypasses local addresses (localhost, 127.0.0.1, ::, ::1 and 0.0.0.0), so manual local bypass configuration is usually not required.                                                  | None      |
 
 #### 🗒️ Other Configuration
 
@@ -311,6 +311,36 @@ Edit `configs/models.json` to customize available models and their settings.
 > Streaming mode can also be overridden with `-real` or `-fake`. This override has higher priority than the system streaming mode, but it only takes effect for streaming requests. For example: `gemini-3-flash-preview-fake`. When used together with a thinking suffix, the streaming suffix should come after the thinking suffix, for example: `gemini-3-flash-preview-minimal-fake` or `gemini-3-flash-preview(minimal)-real`.
 >
 > Web search and code execution can also be forced on with model suffixes: append `-search` for web search and `-code` for code execution. For example: `gemini-3-flash-preview-search` or `gemini-3-flash-preview-code`. When combined with other suffixes, built-in tool suffixes should come last; the full combined order is `thinking -> streaming -> built-in tools`, for example: `gemini-3-flash-preview-minimal-search`, `gemini-3-flash-preview-real-code`, or `gemini-3-flash-preview(minimal)-fake-search-code`.
+
+### 🌐 Sticky Per-Account Proxy
+
+Create `proxylist.txt` in the project root to enable sticky per-account proxies. Add one HTTP proxy per line. Supported formats:
+
+```text
+user:pass@ip:port
+ip:port:user:pass
+ip:port
+http://user:pass@ip:port
+```
+
+When `proxylist.txt` contains at least one valid proxy, the service writes `proxy_mapping.json` and assigns the first free proxy to each active account. Existing account assignments are kept as long as the account still exists and the proxy is still present in `proxylist.txt`. If an account or proxy is removed, its stale mapping is removed automatically. If there are more active accounts than proxies, accounts without an assigned proxy will not start until more proxies are added.
+
+`proxy_mapping.json` is created in the project root. It is a JSON object that maps an account key to the original proxy line, for example:
+
+```json
+{
+  "user@example.com": "user:pass@1.2.3.4:8080",
+  "auth-1": "5.6.7.8:8080"
+}
+```
+
+VNC-based account binding also uses sticky proxies. A new VNC login session reserves a free proxy before opening the browser, and after the account is saved that proxy is persisted to the detected account in `proxy_mapping.json`. If sticky proxy mode is enabled and no free proxy is available, the VNC session fails instead of falling back to the server's direct IP.
+
+Sticky proxies use the same bypass rules as `HTTP_PROXY` / `HTTPS_PROXY`: local addresses are bypassed by default, and custom entries can be added with `NO_PROXY`:
+
+```bash
+NO_PROXY=internal.example.com,10.0.0.0/8
+```
 
 ## 📄 License
 

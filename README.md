@@ -275,7 +275,7 @@ services:
 | `MAX_CONTEXTS`                  | 最大同时登录的账号数量。同时登录的账号切换更快，无需重新登录。数值越大内存消耗越高（约：1 个账号 ~700MB，2 个账号 ~950MB，3 个账号 ~1100MB）。设为 `0` 表示无限制。 | `1`       |
 | `HTTP_PROXY`                    | 用于访问 Google 服务的 HTTP 代理地址。                                                                                                                              | 无        |
 | `HTTPS_PROXY`                   | 用于访问 Google 服务的 HTTPS 代理地址。                                                                                                                             | 无        |
-| `NO_PROXY`                      | 不经过代理的地址列表（逗号分隔）。项目已内置自动绕过本地地址（localhost, 127.0.0.1, 0.0.0.0），通常无需手动配置本地绕过。                                           | 无        |
+| `NO_PROXY`                      | 不经过代理的地址列表（逗号分隔）。项目已内置自动绕过本地地址（localhost, 127.0.0.1, ::, ::1, 0.0.0.0），通常无需手动配置本地绕过。                                  | 无        |
 
 #### 🗒️ 其他配置
 
@@ -313,6 +313,36 @@ services:
 > 真假流式也支持通过模型名后缀覆盖，支持追加 `-real` 或 `-fake`。该后缀优先级高于系统的真假流式，但只会在流式请求中生效。例如：`gemini-3-flash-preview-fake`。若和思考后缀同时使用，真假流后缀应放在思考后缀之后，例如：`gemini-3-flash-preview-minimal-fake` 或 `gemini-3-flash-preview(minimal)-real`。
 >
 > 联网搜索和代码执行也支持通过模型名后缀强制开启：联网搜索追加 `-search`，代码执行追加 `-code`。例如：`gemini-3-flash-preview-search` 或 `gemini-3-flash-preview-code`。若和其他后缀同时使用，内置工具后缀放在最后；完整组合顺序为“思考 -> 流式 -> 内置工具”，例如：`gemini-3-flash-preview-minimal-search`、`gemini-3-flash-preview-real-code` 或 `gemini-3-flash-preview(minimal)-fake-search-code`。
+
+### 🌐 账号固定代理
+
+在项目根目录创建 `proxylist.txt` 即可启用账号固定代理。每行填写一个 HTTP 代理，支持以下格式：
+
+```text
+user:pass@ip:port
+ip:port:user:pass
+ip:port
+http://user:pass@ip:port
+```
+
+当 `proxylist.txt` 至少包含一个有效代理时，服务会写入 `proxy_mapping.json`，并为每个有效账号分配第一个空闲代理。只要账号仍然存在、代理也仍然保留在 `proxylist.txt` 中，已有绑定就会继续复用。如果账号或代理被移除，对应的旧映射会自动清理。如果有效账号数量多于代理数量，没有分配到代理的账号将无法启动，直到添加更多代理。
+
+`proxy_mapping.json` 会生成在项目根目录，格式是“账号标识 -> 原始代理行”的 JSON 对象，例如：
+
+```json
+{
+  "user@example.com": "user:pass@1.2.3.4:8080",
+  "auth-1": "5.6.7.8:8080"
+}
+```
+
+基于 VNC 的账号绑定也会使用固定代理。新的 VNC 登录会先预留一个空闲代理再打开浏览器，账号保存后会把该代理持久化绑定到检测到的账号。如果已启用账号固定代理但没有空闲代理，VNC 会直接返回错误，而不会回退到服务器直连 IP。
+
+账号固定代理使用与 `HTTP_PROXY` / `HTTPS_PROXY` 相同的绕过规则：默认绕过本地地址，也可以通过 `NO_PROXY` 添加自定义绕过项：
+
+```bash
+NO_PROXY=internal.example.com,10.0.0.0/8
+```
 
 ## 📄 许可证
 

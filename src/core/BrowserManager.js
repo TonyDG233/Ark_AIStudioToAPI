@@ -11,6 +11,7 @@ const { firefox } = require("playwright");
 const os = require("os");
 
 const { parseProxyFromEnv } = require("../utils/ProxyUtils");
+const StickyProxyManager = require("../utils/StickyProxyManager");
 const {
     AuthExpiredError,
     isAuthExpiredError,
@@ -33,6 +34,8 @@ class BrowserManager {
         this.logger = logger;
         this.config = config;
         this.authSource = authSource;
+        this.stickyProxyManager = new StickyProxyManager(logger, authSource);
+        this.stickyProxyManager.isEnabled();
         this.browser = null;
 
         // Multi-context architecture: Store all initialized contexts
@@ -76,7 +79,7 @@ class BrowserManager {
         this._wsInitState = new Map();
 
         // Target URL for AI Studio app
-        this.targetUrl = "https://ai.studio/apps/b14eb99d-655e-4d29-ba95-218a8c086e07";
+        this.targetUrl = "https://ai.studio/apps/cab9ab6c-44f9-4e7a-8972-037f8ae177ab";
 
         // Firefox/Camoufox does not use Chromium-style command line args.
         // We keep this empty; Camoufox has its own anti-fingerprinting optimizations built-in.
@@ -1314,15 +1317,20 @@ class BrowserManager {
     }
 
     async launchBrowserForVNC(extraArgs = {}) {
+        const stickyProxy = this.stickyProxyManager.reserveProxyForNewAccount("VNC account binding");
         this.logger.info("🚀 [VNC] Launching a new, separate, headful browser instance for VNC session...");
         const browserExecutablePath = this._getBrowserExecutablePath();
         if (!fs.existsSync(browserExecutablePath)) {
             throw new Error(`Browser executable not found at path: ${browserExecutablePath}`);
         }
 
-        const proxyConfig = parseProxyFromEnv();
+        const proxyConfig = stickyProxy ? stickyProxy.proxy : parseProxyFromEnv();
         if (proxyConfig) {
-            this.logger.info(`[VNC] 🌐 Using proxy: ${proxyConfig.server}`);
+            this.logger.info(
+                stickyProxy
+                    ? `[VNC] Launching browser with proxy: ${stickyProxy.display}`
+                    : `[VNC] 🌐 Using proxy: ${proxyConfig.server}`
+            );
         }
 
         // This browser instance is temporary and specific to the VNC session.
@@ -1359,7 +1367,7 @@ class BrowserManager {
         this.logger.info("✅ [VNC] VNC browser context successfully created.");
 
         // Return both the browser and context so the caller can manage their lifecycle.
-        return { browser: vncBrowser, context };
+        return { browser: vncBrowser, context, stickyProxy };
     }
 
     /**
@@ -1475,7 +1483,13 @@ class BrowserManager {
     async _ensureBrowser() {
         if (this.browser) return;
 
-        const proxyConfig = parseProxyFromEnv();
+        const isStickyProxyEnabled = this.stickyProxyManager.isEnabled();
+        const proxyConfig = isStickyProxyEnabled ? null : parseProxyFromEnv();
+        if (isStickyProxyEnabled) {
+            this.logger.info(
+                "[Browser] Sticky proxy mode enabled; main browser launch will not use environment proxy."
+            );
+        }
         this.logger.info("🚀 [Browser] Launching main browser instance...");
         const browserExecutablePath = this._getBrowserExecutablePath();
         if (!fs.existsSync(browserExecutablePath)) {
@@ -2034,7 +2048,13 @@ class BrowserManager {
             // between concurrent init/reconnect operations on different accounts
             this._wsInitState.set(authIndex, { failed: false, success: false });
 
-            const proxyConfig = parseProxyFromEnv();
+            const stickyProxy = this.stickyProxyManager.getProxyForAuth(authIndex);
+            const proxyConfig = stickyProxy ? stickyProxy.proxy : parseProxyFromEnv();
+            if (stickyProxy) {
+                this.logger.info(
+                    `[Context#${authIndex}] Using sticky proxy for account "${stickyProxy.accountKey}": ${stickyProxy.display}`
+                );
+            }
             const storageStateObject = this.authSource.getAuth(authIndex);
             if (!storageStateObject) {
                 throw new Error(`Failed to get or parse auth source for index ${authIndex}.`);

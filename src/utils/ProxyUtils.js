@@ -33,7 +33,7 @@ const _getBypassEntries = () => {
     return [...new Set([...DEFAULT_BYPASS, ...userBypass])];
 };
 
-const _buildBypassString = () => _getBypassEntries().join(",");
+const getProxyBypassFromEnv = () => _getBypassEntries().join(",");
 
 // Redact credentials in proxy strings, without needing valid URL parsing.
 // - `scheme://user:pass@host` -> `scheme://***@host`
@@ -59,7 +59,7 @@ const parseProxyFromEnv = () => {
     const proxyEnv = _getProxyServerEnv();
     if (!proxyEnv) return null;
 
-    const bypass = _buildBypassString();
+    const bypass = getProxyBypassFromEnv();
 
     // Playwright expects: { server, bypass?, username?, password? }
     // server examples: "http://127.0.0.1:7890", "socks5://127.0.0.1:7890"
@@ -112,4 +112,4 @@ const getProxySummaryFromEnv = () => {
     }
 };
 
-module.exports = { getProxySummaryFromEnv, parseProxyFromEnv };
+module.exports = { getProxyBypassFromEnv, getProxySummaryFromEnv, parseProxyFromEnv };
