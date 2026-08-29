@@ -356,4 +356,12 @@ We would like to thank all developers who have contributed their time, effort, a
 
 If you find AIStudioToAPI useful, consider giving it a ⭐️!
 
-[![Star History Chart](https://api.star-history.com/svg?repos=iBUHub/AIStudioToAPI&type=date&legend=top-left)](https://www.star-history.com/#iBUHub/AIStudioToAPI&type=date&legend=top-left)
+## Star History
+
+<a href="https://star-history.dera.page/#iBUHub/AIStudioToAPI">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=iBUHub/AIStudioToAPI&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=iBUHub/AIStudioToAPI" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=iBUHub/AIStudioToAPI" />
+ </picture>
+</a>

@@ -358,4 +358,12 @@ NO_PROXY=internal.example.com,10.0.0.0/8
 
 如果你觉得 AIStudioToAPI 对你有帮助，欢迎给项目点一个 ⭐️！
 
-[![Star History Chart](https://api.star-history.com/svg?repos=iBUHub/AIStudioToAPI&type=date&legend=top-left)](https://www.star-history.com/#iBUHub/AIStudioToAPI&type=date&legend=top-left)
+## Star History
+
+<a href="https://star-history.dera.page/#iBUHub/AIStudioToAPI">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=iBUHub/AIStudioToAPI&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=iBUHub/AIStudioToAPI" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=iBUHub/AIStudioToAPI" />
+ </picture>
+</a>
