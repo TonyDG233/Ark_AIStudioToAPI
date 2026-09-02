@@ -502,6 +502,34 @@
                                         stroke-linejoin="round"
                                         style="margin-right: 6px; vertical-align: middle"
                                     >
+                                        <path d="M5 12h14"></path>
+                                        <path d="M12 5l7 7-7 7"></path>
+                                    </svg>
+                                    <span>
+                                        {{ t("atgMode") }}
+                                        <EnvVarTooltip env-var="ATG_MODE" doc-section="other-config" />
+                                    </span>
+                                </span>
+                                <span
+                                    class="value status-text-bold"
+                                    :class="state.atgMode !== 'off' ? 'status-ok' : 'status-error'"
+                                    >{{ t(`atgMode.${state.atgMode}`) }}</span
+                                >
+                            </div>
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
                                         <path d="M15.5 13a3.5 3.5 0 0 0 -3.5 3.5v1a3.5 3.5 0 0 0 7 0v-1.8"></path>
                                         <path d="M8.5 13a3.5 3.5 0 0 1 3.5 3.5v1a3.5 3.5 0 0 1 -7 0v-1.8"></path>
                                         <path d="M17.5 16a3.5 3.5 0 0 0 0 -7h-.5"></path>
