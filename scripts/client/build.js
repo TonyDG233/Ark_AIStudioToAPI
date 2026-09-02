@@ -446,6 +446,23 @@ class RequestProcessor {
                 try {
                     const bodyObj = JSON.parse(requestSpec.body);
 
+                    // --- Module 0.5: [AGW] Preserve synthetic transport tool declarations ---
+                    // The synthetic transport tool (AGW_TOOL_PREFIX, default agw_emit_) is injected
+                    // server-side; downstream tool-filtering modules must not remove it, so we
+                    // snapshot its declarations here and restore them after filtering.
+                    const agwSyntheticDeclarations = [];
+                    if (Array.isArray(bodyObj.tools)) {
+                        for (const tool of bodyObj.tools) {
+                            if (tool && Array.isArray(tool.functionDeclarations)) {
+                                for (const decl of tool.functionDeclarations) {
+                                    if (decl && typeof decl.name === "string" && decl.name.startsWith("agw_emit_")) {
+                                        agwSyntheticDeclarations.push(decl);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // --- Module 1: Embedding/TTS Model Filtering ---
                     const requestPath = String(requestSpec.path || "");
                     const isImageModel = requestPath.includes("-image") || requestPath.includes("imagen");
@@ -555,6 +572,25 @@ class RequestProcessor {
                                 `Gemini 2/2.5 + JSON mode detected, automatically filtering tool parameter to prevent API error`
                             );
                         }
+                    }
+
+                    // --- Module 4.5: [AGW] Restore synthetic transport tool declarations ---
+                    if (agwSyntheticDeclarations.length > 0) {
+                        if (!Array.isArray(bodyObj.tools) || bodyObj.tools.length === 0) {
+                            bodyObj.tools = [{ functionDeclarations: [] }];
+                        }
+                        const agwTarget = bodyObj.tools[0];
+                        if (!Array.isArray(agwTarget.functionDeclarations)) {
+                            agwTarget.functionDeclarations = [];
+                        }
+                        for (const decl of agwSyntheticDeclarations) {
+                            if (!agwTarget.functionDeclarations.some(d => d && d.name === decl.name)) {
+                                agwTarget.functionDeclarations.push(decl);
+                            }
+                        }
+                        Logger.debug(
+                            `[AGW] Restored ${agwSyntheticDeclarations.length} synthetic transport tool declaration(s) after filtering`
+                        );
                     }
 
                     // adapt gemini 3 pro preview
