@@ -39,6 +39,7 @@ class RequestHandler {
 
         // Optional synthetic-transport post-processing module (ATG_* env, default off)
         this.atg = createAtgProcessor();
+        this.atgMode = this.atg.cfg.mode;
 
         this.needsSwitchingAfterRequest = false;
 
@@ -180,6 +181,22 @@ class RequestHandler {
         if (pathValue.includes("generateContent") || pathValue.includes("streamGenerateContent")) return "generation";
         if (pathValue.includes("/upload/")) return "upload";
         return fallback;
+    }
+
+    /**
+     * [ATG] Hot-switch the post-processing mode without restart (UI settings).
+     * Keeps env-derived options (prefix/lengths/etc.), overriding only the mode.
+     * Returns the effective mode.
+     */
+    setAtgMode(mode) {
+        if (!["off", "prefer", "required"].includes(mode)) {
+            return this.atgMode;
+        }
+        const current = (this.atg && this.atg.cfg) || {};
+        this.atg = createAtgProcessor({ ...current, mode });
+        this.atgMode = this.atg.cfg.mode;
+        this.logger.debug(`[ATG] mode hot-switched to: ${this.atgMode}`);
+        return this.atgMode;
     }
 
     /**

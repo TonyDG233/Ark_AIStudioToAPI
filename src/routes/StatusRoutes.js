@@ -781,6 +781,24 @@ class StatusRoutes {
             });
         });
 
+        app.put("/api/settings/atg-mode", isAuthenticated, (req, res) => {
+            const newMode = String(req.body?.mode || "")
+                .trim()
+                .toLowerCase();
+            if (!["off", "prefer", "required"].includes(newMode)) {
+                return res.status(400).json({ error: "Invalid ATG mode", message: "settingFailed" });
+            }
+
+            const effectiveMode = this.serverSystem.requestHandler.setAtgMode(newMode);
+            this.logger.info(`[WebUI] ATG (Anti-Truncation Gateway) mode switched to: ${effectiveMode}`);
+
+            return res.status(200).json({
+                message: "settingUpdateSuccess",
+                setting: "atgMode",
+                value: effectiveMode,
+            });
+        });
+
         app.put("/api/settings/debug-mode", isAuthenticated, (req, res) => {
             const currentLevel = LoggingService.getLevel();
             const newLevel = currentLevel === "DEBUG" ? "INFO" : "DEBUG";
@@ -1012,6 +1030,7 @@ class StatusRoutes {
                 accountDetails,
                 activeContextsCount: browserManager.contexts.size,
                 apiKeySource: config.apiKeySource,
+                atgMode: requestHandler.atgMode || "off",
                 autoSwitchIntervalHours: this.config.autoSwitchIntervalHours,
                 browserConnected: !!this.serverSystem.connectionRegistry.getConnectionByAuth(currentAuthIndex, false),
                 checkUpdate: config.checkUpdate,
