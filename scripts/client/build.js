@@ -446,6 +446,23 @@ class RequestProcessor {
                 try {
                     const bodyObj = JSON.parse(requestSpec.body);
 
+                    // --- Module 0.5: [ATG] Preserve synthetic transport tool declarations ---
+                    // The synthetic transport tool (ATG_TOOL_PREFIX, default atg_emit_) is injected
+                    // server-side; downstream tool-filtering modules must not remove it, so we
+                    // snapshot its declarations here and restore them after filtering.
+                    const atgSyntheticDeclarations = [];
+                    if (Array.isArray(bodyObj.tools)) {
+                        for (const tool of bodyObj.tools) {
+                            if (tool && Array.isArray(tool.functionDeclarations)) {
+                                for (const decl of tool.functionDeclarations) {
+                                    if (decl && typeof decl.name === "string" && decl.name.startsWith("atg_emit_")) {
+                                        atgSyntheticDeclarations.push(decl);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // --- Module 1: Embedding/TTS Model Filtering ---
                     const requestPath = String(requestSpec.path || "");
                     const isImageModel = requestPath.includes("-image") || requestPath.includes("imagen");
@@ -555,6 +572,25 @@ class RequestProcessor {
                                 `Gemini 2/2.5 + JSON mode detected, automatically filtering tool parameter to prevent API error`
                             );
                         }
+                    }
+
+                    // --- Module 4.5: [ATG] Restore synthetic transport tool declarations ---
+                    if (atgSyntheticDeclarations.length > 0) {
+                        if (!Array.isArray(bodyObj.tools) || bodyObj.tools.length === 0) {
+                            bodyObj.tools = [{ functionDeclarations: [] }];
+                        }
+                        const atgTarget = bodyObj.tools[0];
+                        if (!Array.isArray(atgTarget.functionDeclarations)) {
+                            atgTarget.functionDeclarations = [];
+                        }
+                        for (const decl of atgSyntheticDeclarations) {
+                            if (!atgTarget.functionDeclarations.some(d => d && d.name === decl.name)) {
+                                atgTarget.functionDeclarations.push(decl);
+                            }
+                        }
+                        Logger.debug(
+                            `[ATG] Restored ${atgSyntheticDeclarations.length} synthetic transport tool declaration(s) after filtering`
+                        );
                     }
 
                     // adapt gemini 3 pro preview

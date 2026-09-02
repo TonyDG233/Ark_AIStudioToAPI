@@ -502,6 +502,34 @@
                                         stroke-linejoin="round"
                                         style="margin-right: 6px; vertical-align: middle"
                                     >
+                                        <path d="M5 12h14"></path>
+                                        <path d="M12 5l7 7-7 7"></path>
+                                    </svg>
+                                    <span>
+                                        {{ t("atgMode") }}
+                                        <EnvVarTooltip env-var="ATG_MODE" doc-section="other-config" />
+                                    </span>
+                                </span>
+                                <span
+                                    class="value status-text-bold"
+                                    :class="state.atgMode !== 'off' ? 'status-ok' : 'status-error'"
+                                    >{{ t(`atgMode.${state.atgMode}`) }}</span
+                                >
+                            </div>
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
                                         <path d="M15.5 13a3.5 3.5 0 0 0 -3.5 3.5v1a3.5 3.5 0 0 0 7 0v-1.8"></path>
                                         <path d="M8.5 13a3.5 3.5 0 0 1 3.5 3.5v1a3.5 3.5 0 0 1 -7 0v-1.8"></path>
                                         <path d="M17.5 16a3.5 3.5 0 0 0 0 -7h-.5"></path>
@@ -1630,6 +1658,34 @@
                                 >
                                     <el-option
                                         v-for="option in safetySettingsThresholdOptions"
+                                        :key="option.value"
+                                        :label="t(option.label)"
+                                        :value="option.value"
+                                    />
+                                </el-select>
+                            </div>
+                            <div class="switch-container">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <path d="M5 12h14"></path>
+                                        <path d="M12 5l7 7-7 7"></path>
+                                    </svg>
+                                    {{ t("atgMode") }}
+                                </span>
+                                <el-select v-model="state.atgMode" style="width: 150px" @change="handleAtgModeChange">
+                                    <el-option
+                                        v-for="option in atgModeOptions"
                                         :key="option.value"
                                         :label="t(option.label)"
                                         :value="option.value"
@@ -3754,6 +3810,7 @@ const state = reactive({
     accountDetails: [],
     activeContextsCount: 0,
     apiKeySource: "",
+    atgMode: "off",
     autoSwitchIntervalHours: 0,
     browserConnected: false,
     checkUpdateEnabled: true,
@@ -3775,16 +3832,24 @@ const state = reactive({
     latestVersion: null,
     logCount: 0,
     logMaxCount: 100,
+
     logs: t("loading"),
+
     logScrollTop: 0,
+
     maxContexts: 1,
+
     maxRetries: 3,
+
     nextSwitchTimestamp: -1,
+
     releaseUrl: null,
+
     safetySettingsThreshold: "OFF",
+
     selectedAccounts: new Set(),
+
     serviceConnected: false,
-    // Selected account indices
     startupKeepaliveEnabled: false,
     startupKeepaliveProgress: { current: 0, total: 0 },
     startupKeepaliveState: "inactive",
@@ -3803,6 +3868,12 @@ const safetySettingsThresholdOptions = [
     { label: "safetySettingsThreshold.BLOCK_MEDIUM_AND_ABOVE", value: "BLOCK_MEDIUM_AND_ABOVE" },
     { label: "safetySettingsThreshold.BLOCK_ONLY_HIGH", value: "BLOCK_ONLY_HIGH" },
     { label: "safetySettingsThreshold.BLOCK_NONE", value: "BLOCK_NONE" },
+];
+
+const atgModeOptions = [
+    { label: "atgMode.off", value: "off" },
+    { label: "atgMode.prefer", value: "prefer" },
+    { label: "atgMode.required", value: "required" },
 ];
 
 const browserConnectedClass = computed(() => {
@@ -4368,6 +4439,35 @@ const handleSafetySettingsThresholdChange = async val => {
     }
 };
 
+const handleAtgModeChange = async val => {
+    if (!val) return;
+
+    try {
+        const res = await fetch("/api/settings/atg-mode", {
+            body: JSON.stringify({ mode: val }),
+            headers: { "Content-Type": "application/json" },
+            method: "PUT",
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+            ElMessage.success(
+                t(data.message, {
+                    setting: t("atgMode"),
+                    value: t(`atgMode.${val}`),
+                })
+            );
+            updateContent();
+        } else {
+            ElMessage.error(t(data.message || "settingFailed", { message: data.error || "" }));
+            updateContent();
+        }
+    } catch (err) {
+        ElMessage.error(t("settingFailed", { message: err.message || err }));
+        updateContent();
+    }
+};
+
 const handleLanguageChange = lang => {
     I18n.setLang(lang);
     state.currentLang = lang;
@@ -4557,6 +4657,7 @@ const updateStatus = data => {
     state.maxContexts = data.status.maxContexts ?? 1;
     state.maxRetries = data.status.maxRetries ?? 3;
     state.safetySettingsThreshold = data.status.safetySettingsThreshold || "OFF";
+    state.atgMode = data.status.atgMode || "off";
     state.startupKeepaliveEnabled = isEnabled(data.status.startupKeepaliveEnabled);
     state.startupKeepaliveProgress = data.status.startupKeepaliveProgress || { current: 0, total: 0 };
     state.startupKeepaliveState = data.status.startupKeepaliveState || "inactive";

@@ -13,6 +13,7 @@ const AuthSwitcher = require("../auth/AuthSwitcher");
 const FormatConverter = require("./FormatConverter");
 const { isUserAbortedError } = require("../utils/CustomErrors");
 const { QueueClosedError, QueueTimeoutError } = require("../utils/MessageQueue");
+const { createAtgProcessor } = require("../atg");
 
 const WS_RECONNECT_WAIT_MS = 130000;
 const WS_CONNECTION_READY_TIMEOUT_MS = 10000;
@@ -35,6 +36,10 @@ class RequestHandler {
         // Initialize sub-modules
         this.authSwitcher = new AuthSwitcher(logger, config, authSource, browserManager);
         this.formatConverter = new FormatConverter(logger, serverSystem);
+
+        // Optional synthetic-transport post-processing module (ATG_* env, default off)
+        this.atg = createAtgProcessor();
+        this.atgMode = this.atg.cfg.mode;
 
         this.needsSwitchingAfterRequest = false;
 
@@ -116,6 +121,54 @@ class RequestHandler {
         );
     }
 
+    /**
+     * [ATG] Pass one raw Gemini SSE chunk through the per-request stream unwrapper.
+     * Returns the transformed chunk string, or null when the chunk was consumed
+     * (buffered/suppressed) and must not be forwarded.
+     * In real-stream mode message.data arrives as a raw SSE line "data: {...}",
+     * so the prefix is stripped before parsing.
+     */
+    _processAtgStreamData(data, unwrapper, contextLabel) {
+        if (!unwrapper) {
+            return data;
+        }
+
+        const raw = data;
+        let pending = null;
+        if (typeof raw === "string") {
+            let candidate = raw.trim();
+            if (candidate.startsWith("data:")) {
+                candidate = candidate.slice(5).trim();
+            }
+            if (candidate === "[DONE]") {
+                return null;
+            }
+            pending = candidate;
+        }
+
+        if (pending === null || pending === "") {
+            return null;
+        }
+
+        let parsed = null;
+        try {
+            parsed = JSON.parse(pending);
+        } catch (e) {
+            this.logger.warn(`[ATG] chunk parse failed (${contextLabel}), forwarding raw: ${e.message}`);
+            return data;
+        }
+        try {
+            const r = unwrapper.processChunk(parsed);
+            if (!r || !r.data) {
+                return null;
+            }
+            return `data: ${JSON.stringify(r.data)}`;
+        } catch (e) {
+            this.logger.warn(`[ATG] stream unwrap error (${contextLabel}), forwarding raw: ${e.message}`);
+            return data;
+        }
+    }
+
     _categorizeRequest(pathValue, fallback = "request") {
         if (typeof pathValue !== "string") return fallback;
         if (
@@ -128,6 +181,53 @@ class RequestHandler {
         if (pathValue.includes("generateContent") || pathValue.includes("streamGenerateContent")) return "generation";
         if (pathValue.includes("/upload/")) return "upload";
         return fallback;
+    }
+
+    /**
+     * [ATG] Hot-switch the post-processing mode without restart (UI settings).
+     * Keeps env-derived options (prefix/lengths/etc.), overriding only the mode.
+     * Returns the effective mode.
+     */
+    setAtgMode(mode) {
+        if (!["off", "prefer", "required"].includes(mode)) {
+            return this.atgMode;
+        }
+        const current = (this.atg && this.atg.cfg) || {};
+        this.atg = createAtgProcessor({ ...current, mode });
+        this.atgMode = this.atg.cfg.mode;
+        this.logger.debug(`[ATG] mode hot-switched to: ${this.atgMode}`);
+        return this.atgMode;
+    }
+
+    /**
+     * [ATG] Wrap an outgoing native Gemini body with the synthetic transport tool.
+     * Purging stale synthetic history + injection happen inside; returns the modified
+     * body and the per-request synthetic tool name ("" when skipped).
+     * modelName is passed explicitly because the Gemini body has no top-level model field.
+     */
+    _applyAtgWrap(googleBody, contextLabel, modelName = "") {
+        if (!this.atg || !this.atg.enabled) {
+            return { body: googleBody, toolName: "" };
+        }
+        try {
+            const wrapped = this.atg.wrap(googleBody, modelName);
+            if (wrapped.toolName) {
+                this.logger.debug(
+                    `[ATG] wrapped (${contextLabel}): tool=${wrapped.toolName}, ` +
+                        `model=${modelName || (googleBody && googleBody.model)}, ` +
+                        `contents=${Array.isArray(googleBody && googleBody.contents) ? googleBody.contents.length : 0}, ` +
+                        `tools=${Array.isArray(googleBody && googleBody.tools) ? googleBody.tools.length : 0}`
+                );
+            } else {
+                this.logger.debug(
+                    `[ATG] wrap skipped (${contextLabel}): model=${modelName || (googleBody && googleBody.model)}`
+                );
+            }
+            return { body: wrapped.body, toolName: wrapped.toolName };
+        } catch (e) {
+            this.logger.warn(`[ATG] wrap failed (${contextLabel}), proceeding without wrap: ${e.message}`);
+            return { body: googleBody, toolName: "" };
+        }
     }
 
     _setResponseApiFormat(res, apiFormat) {
@@ -1185,7 +1285,13 @@ class RequestHandler {
             const effectiveStreamMode = modelStreamingMode || systemStreamMode;
             const useRealStream = isOpenAIStream && effectiveStreamMode === "real";
             const googleEndpoint = useRealStream ? "streamGenerateContent" : "generateContent";
+
+            // [ATG] optional synthetic transport tool wrap (ATG_MODE=prefer/required)
+            const atgWrap = this._applyAtgWrap(googleBody, "openai", model);
+            googleBody = atgWrap.body;
+
             const proxyRequest = {
+                atgToolName: atgWrap.toolName || undefined,
                 body: JSON.stringify(googleBody),
                 headers: { "Content-Type": "application/json" },
                 is_generative: true,
@@ -1309,7 +1415,7 @@ class RequestHandler {
                         "Content-Type": "text/event-stream",
                     });
                     this.logger.info(`[Request] OpenAI streaming response (Real Mode) started...`);
-                    await this._streamOpenAIResponse(currentQueue, res, model, requestId);
+                    await this._streamOpenAIResponse(currentQueue, res, model, requestId, proxyRequest.atgToolName);
                 } else {
                     // OpenAI Fake Stream / Non-Stream mode
                     // Set up keep-alive timer for fake stream mode to prevent client timeout
@@ -1454,6 +1560,7 @@ class RequestHandler {
                             }
                         } else {
                             // Non-stream
+                            res.__atgToolName = proxyRequest.atgToolName || "";
                             await this._sendOpenAINonStreamResponse(activeQueue, res, model, requestId);
                         }
                     } finally {
@@ -1586,9 +1693,18 @@ class RequestHandler {
 
             const effectiveStreamMode = modelStreamingMode || systemStreamMode;
             const useRealStream = isOpenAIStream && effectiveStreamMode === "real";
-
             const googleEndpoint = useRealStream ? "streamGenerateContent" : "generateContent";
+            let atgToolName = "";
+
+            // [ATG] optional synthetic transport tool wrap (ATG_MODE=prefer/required)
+            {
+                const atgWrap = this._applyAtgWrap(googleBody, "openai-response", model);
+                atgToolName = atgWrap.toolName || "";
+                googleBody = atgWrap.body;
+            }
+
             const proxyRequest = {
+                atgToolName: atgToolName || undefined,
                 body: JSON.stringify(googleBody),
                 headers: { "Content-Type": "application/json" },
                 is_generative: true,
@@ -1874,6 +1990,7 @@ class RequestHandler {
                             }
                         } else {
                             // Non-stream
+                            res.__atgToolName = proxyRequest.atgToolName || "";
                             await this._sendOpenAIResponseAPINonStreamResponse(
                                 activeQueue,
                                 res,
@@ -1958,9 +2075,14 @@ class RequestHandler {
 
             const effectiveStreamMode = modelStreamingMode || systemStreamMode;
             const useRealStream = isClaudeStream && effectiveStreamMode === "real";
-
             const googleEndpoint = useRealStream ? "streamGenerateContent" : "generateContent";
+
+            // [ATG] optional synthetic transport tool wrap (ATG_MODE=prefer/required)
+            const atgWrap = this._applyAtgWrap(googleBody, "claude", model);
+            googleBody = atgWrap.body;
+
             const proxyRequest = {
+                atgToolName: atgWrap.toolName || undefined,
                 body: JSON.stringify(googleBody),
                 headers: { "Content-Type": "application/json" },
                 is_generative: true,
@@ -2074,7 +2196,7 @@ class RequestHandler {
                         "Content-Type": "text/event-stream",
                     });
                     this.logger.info(`[Request] Claude streaming response (Real Mode) started...`);
-                    await this._streamClaudeResponse(currentQueue, res, model, requestId);
+                    await this._streamClaudeResponse(currentQueue, res, model, requestId, proxyRequest.atgToolName);
                 } else {
                     // Claude Fake Stream / Non-Stream mode
                     let connectionMaintainer;
@@ -2218,6 +2340,7 @@ class RequestHandler {
                             }
                         } else {
                             // Non-stream
+                            res.__atgToolName = proxyRequest.atgToolName || "";
                             await this._sendClaudeNonStreamResponse(activeQueue, res, model, requestId);
                         }
                     } finally {
@@ -2546,6 +2669,8 @@ class RequestHandler {
 
     async _streamClaudeResponse(messageQueue, res, model, requestId) {
         const streamState = {};
+        const atgToolName = res.__atgToolName || "";
+        const atgUnwrapper = atgToolName && this.atg ? this.atg.createStreamUnwrapper(atgToolName) : null;
 
         try {
             // eslint-disable-next-line no-constant-condition
@@ -2553,6 +2678,28 @@ class RequestHandler {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
 
                 if (message.type === "STREAM_END") {
+                    if (atgUnwrapper) {
+                        const flush = atgUnwrapper.finish();
+                        if (flush && flush.data) {
+                            if (this._isResponseWritable(res)) {
+                                try {
+                                    const claudeFlush = this.formatConverter.translateGoogleToClaudeStream(
+                                        JSON.stringify(flush.data),
+                                        model,
+                                        streamState
+                                    );
+                                    if (claudeFlush) {
+                                        res.write(claudeFlush);
+                                    }
+                                } catch (flushError) {
+                                    this.logger.debug(
+                                        `[ATG] failed to forward flushed chunk to Claude stream: ${flushError.message}`
+                                    );
+                                }
+                            }
+                        }
+                        this.logger.debug(`[ATG] stream done (claude): stats=${JSON.stringify(atgUnwrapper.stats)}`);
+                    }
                     this.logger.info(`✅ [Request] Response completed (Claude real stream), request ID: ${requestId}`);
                     break;
                 }
@@ -2583,11 +2730,14 @@ class RequestHandler {
                 }
 
                 if (message.data) {
-                    const claudeChunk = this.formatConverter.translateGoogleToClaudeStream(
-                        message.data,
-                        model,
-                        streamState
-                    );
+                    let data = message.data;
+                    if (atgUnwrapper) {
+                        data = this._processAtgStreamData(data, atgUnwrapper, "claude");
+                        if (data === null) {
+                            continue;
+                        }
+                    }
+                    const claudeChunk = this.formatConverter.translateGoogleToClaudeStream(data, model, streamState);
                     if (claudeChunk) {
                         // Before writing, ensure the response is still writable to avoid
                         // throwing if the client disconnected mid-stream.
@@ -2645,7 +2795,25 @@ class RequestHandler {
         }
 
         try {
-            const googleResponse = JSON.parse(fullBody);
+            let googleResponse = JSON.parse(fullBody);
+
+            // [ATG] unwrap synthetic transport tool before Claude conversion
+            const atgToolName = res.__atgToolName || "";
+            if (atgToolName && this.atg) {
+                try {
+                    const unwrapped = this.atg.unwrapResponse(googleResponse, atgToolName);
+                    googleResponse = unwrapped.response;
+                    const s = unwrapped.stats;
+                    if (s && (s.syntheticHit || s.conflict || s.repaired)) {
+                        this.logger.debug(`[ATG] non-stream unwrap (claude): stats=${JSON.stringify(s)}`);
+                    } else {
+                        this.logger.debug(`[ATG] non-stream passthrough (claude): stats=${JSON.stringify(s)}`);
+                    }
+                } catch (e) {
+                    this.logger.warn(`[ATG] non-stream unwrap failed (claude), forwarding raw: ${e.message}`);
+                }
+            }
+
             const claudeResponse = this.formatConverter.convertGoogleToClaudeNonStream(googleResponse, model);
             res.type("application/json").send(JSON.stringify(claudeResponse));
             this.logger.info(`✅ [Request] Response completed (Claude non-stream), request ID: ${requestId}`);
@@ -3568,14 +3736,35 @@ class RequestHandler {
         }
     }
 
-    async _streamOpenAIResponse(messageQueue, res, model, requestId) {
+    async _streamOpenAIResponse(messageQueue, res, model, requestId, atgToolName = "") {
         const streamState = {};
+        const atgUnwrapper = atgToolName && this.atg ? this.atg.createStreamUnwrapper(atgToolName) : null;
 
         try {
             // eslint-disable-next-line no-constant-condition
             while (true) {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (message.type === "STREAM_END") {
+                    if (atgUnwrapper) {
+                        const flush = atgUnwrapper.finish();
+                        if (flush && flush.data && this._isResponseWritable(res)) {
+                            try {
+                                const openAIFlush = this.formatConverter.translateGoogleToOpenAIStream(
+                                    JSON.stringify(flush.data),
+                                    model,
+                                    streamState
+                                );
+                                if (openAIFlush) {
+                                    res.write(openAIFlush);
+                                }
+                            } catch (flushError) {
+                                this.logger.debug(
+                                    `[ATG] failed to forward flushed chunk to OpenAI stream: ${flushError.message}`
+                                );
+                            }
+                        }
+                        this.logger.debug(`[ATG] stream done (openai): stats=${JSON.stringify(atgUnwrapper.stats)}`);
+                    }
                     if (this._isResponseWritable(res)) {
                         try {
                             res.write("data: [DONE]\n\n");
@@ -3609,11 +3798,14 @@ class RequestHandler {
                 }
 
                 if (message.data) {
-                    const openAIChunk = this.formatConverter.translateGoogleToOpenAIStream(
-                        message.data,
-                        model,
-                        streamState
-                    );
+                    let data = message.data;
+                    if (atgUnwrapper) {
+                        data = this._processAtgStreamData(data, atgUnwrapper, "openai");
+                        if (data === null) {
+                            continue;
+                        }
+                    }
+                    const openAIChunk = this.formatConverter.translateGoogleToOpenAIStream(data, model, streamState);
                     if (openAIChunk) {
                         if (!this._isResponseWritable(res)) {
                             this.logger.debug(
@@ -3671,7 +3863,25 @@ class RequestHandler {
 
         // Parse and convert to OpenAI Response API format
         try {
-            const googleResponse = JSON.parse(fullBody);
+            let googleResponse = JSON.parse(fullBody);
+
+            // [ATG] unwrap synthetic transport tool before Response API conversion
+            const atgToolName = res.__atgToolName || "";
+            if (atgToolName && this.atg) {
+                try {
+                    const unwrapped = this.atg.unwrapResponse(googleResponse, atgToolName);
+                    googleResponse = unwrapped.response;
+                    const s = unwrapped.stats;
+                    if (s && (s.syntheticHit || s.conflict || s.repaired)) {
+                        this.logger.debug(`[ATG] non-stream unwrap (openai-response): stats=${JSON.stringify(s)}`);
+                    } else {
+                        this.logger.debug(`[ATG] non-stream passthrough (openai-response): stats=${JSON.stringify(s)}`);
+                    }
+                } catch (e) {
+                    this.logger.warn(`[ATG] non-stream unwrap failed (openai-response), forwarding raw: ${e.message}`);
+                }
+            }
+
             const responseAPIResponse = this.formatConverter.convertGoogleToResponseAPINonStream(
                 googleResponse,
                 model,
@@ -3711,7 +3921,25 @@ class RequestHandler {
 
         // Parse and convert to OpenAI format
         try {
-            const googleResponse = JSON.parse(fullBody);
+            let googleResponse = JSON.parse(fullBody);
+
+            // [ATG] unwrap synthetic transport tool before OpenAI conversion
+            const atgToolName = res.__atgToolName || "";
+            if (atgToolName && this.atg) {
+                try {
+                    const unwrapped = this.atg.unwrapResponse(googleResponse, atgToolName);
+                    googleResponse = unwrapped.response;
+                    const s = unwrapped.stats;
+                    if (s && (s.syntheticHit || s.conflict || s.repaired)) {
+                        this.logger.debug(`[ATG] non-stream unwrap (openai): stats=${JSON.stringify(s)}`);
+                    } else {
+                        this.logger.debug(`[ATG] non-stream passthrough (openai): stats=${JSON.stringify(s)}`);
+                    }
+                } catch (e) {
+                    this.logger.warn(`[ATG] non-stream unwrap failed (openai), forwarding raw: ${e.message}`);
+                }
+            }
+
             const openAIResponse = this.formatConverter.convertGoogleToOpenAINonStream(googleResponse, model);
             res.type("application/json").send(JSON.stringify(openAIResponse));
             this.logger.info(`✅ [Request] Response completed (OpenAI non-stream), request ID: ${requestId}`);
