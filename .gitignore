@@ -35,7 +35,9 @@ tmp/
 temp/
 ui/dist/
 *.css
-test/
+test/*
+!test/antigravity/
+!test/antigravity/*.test.js
 debug_*.png
 debug_*.html
 .local_logs
