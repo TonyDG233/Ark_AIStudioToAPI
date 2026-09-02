@@ -1,5 +1,5 @@
 /**
- * File: test/antigravity/extractor.test.js
+ * File: test/atg/extractor.test.js
  * Description: TDD contract for extractor.js non-streaming normalization (Gemini format)
  * Source contract: Antigravity-gateway internal/synthetic/normalizer_test.go
  * Adaptation: operates on native Gemini response (candidates[].content.parts[].functionCall)
@@ -7,8 +7,8 @@
 const { describe, test } = require("node:test");
 const assert = require("node:assert");
 
-const { createExtractor } = require("../../src/antigravity/extractor");
-const { repairSyntheticArguments } = require("../../src/antigravity/repair");
+const { createExtractor } = require("../../src/atg/extractor");
+const { repairSyntheticArguments } = require("../../src/atg/repair");
 
 const BASE_CFG = { maxResponseBytes: 1024 * 1024, wrapperMode: "prefer" };
 
@@ -22,7 +22,7 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
         const resp = {
             candidates: [
                 {
-                    content: { parts: [synthPart("agw_emit_test123", "This is the final response.")], role: "model" },
+                    content: { parts: [synthPart("atg_emit_test123", "This is the final response.")], role: "model" },
                     finishReason: "TOOL_CALLS",
                     index: 0,
                 },
@@ -32,7 +32,7 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
             usageMetadata: { totalTokenCount: 30 },
         };
 
-        const { response, stats } = ex.normalizeNonStreaming(resp, "agw_emit_test123");
+        const { response, stats } = ex.normalizeNonStreaming(resp, "atg_emit_test123");
 
         assert.strictEqual(stats.syntheticHit, true);
         assert.strictEqual(stats.syntheticCount, 1);
@@ -53,7 +53,7 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
                     content: {
                         parts: [
                             { functionCall: { args: { location: "Tokyo" }, name: "get_weather" } },
-                            synthPart("agw_emit_abc", "Weather query result."),
+                            synthPart("atg_emit_abc", "Weather query result."),
                         ],
                         role: "model",
                     },
@@ -63,7 +63,7 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
             ],
         };
 
-        const { response, stats } = ex.normalizeNonStreaming(resp, "agw_emit_abc");
+        const { response, stats } = ex.normalizeNonStreaming(resp, "atg_emit_abc");
 
         assert.strictEqual(stats.realToolCount, 1);
         assert.strictEqual(stats.syntheticCount, 1);
@@ -85,7 +85,7 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
                     content: {
                         parts: [
                             { text: "Standard preamble text that should NOT be concatenated." },
-                            synthPart("agw_emit_xyz", "The authoritative synthetic response."),
+                            synthPart("atg_emit_xyz", "The authoritative synthetic response."),
                         ],
                         role: "model",
                     },
@@ -95,7 +95,7 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
             ],
         };
 
-        const { response, stats } = ex.normalizeNonStreaming(resp, "agw_emit_xyz");
+        const { response, stats } = ex.normalizeNonStreaming(resp, "atg_emit_xyz");
 
         assert.strictEqual(stats.conflict, true);
         const parts = response.candidates[0].content.parts;
@@ -112,7 +112,7 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
             candidates: [
                 {
                     content: {
-                        parts: [{ text: "thinking step", thought: true }, synthPart("agw_emit_t", "final")],
+                        parts: [{ text: "thinking step", thought: true }, synthPart("atg_emit_t", "final")],
                         role: "model",
                     },
                     finishReason: "TOOL_CALLS",
@@ -121,7 +121,7 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
             ],
         };
 
-        const { response } = ex.normalizeNonStreaming(resp, "agw_emit_t");
+        const { response } = ex.normalizeNonStreaming(resp, "atg_emit_t");
         const parts = response.candidates[0].content.parts;
         assert.deepStrictEqual(parts[0], { text: "thinking step", thought: true });
         assert.deepStrictEqual(parts[1], { text: "final" });
@@ -132,7 +132,7 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
         const resp = {
             candidates: [{ content: { parts: [{ text: "plain" }], role: "model" }, finishReason: "STOP", index: 0 }],
         };
-        const { response, stats } = ex.normalizeNonStreaming(resp, "agw_emit_unused");
+        const { response, stats } = ex.normalizeNonStreaming(resp, "atg_emit_unused");
         assert.strictEqual(stats.syntheticHit, false);
         assert.deepStrictEqual(response, resp);
     });
@@ -142,7 +142,7 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
         const resp = {
             candidates: [{ content: { parts: [{ text: "plain" }], role: "model" }, finishReason: "STOP", index: 0 }],
         };
-        assert.throws(() => ex.normalizeNonStreaming(resp, "agw_emit_req"));
+        assert.throws(() => ex.normalizeNonStreaming(resp, "atg_emit_req"));
     });
 
     test("wrapperMode off: verbatim passthrough", () => {
@@ -158,7 +158,7 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
             candidates: [
                 {
                     content: {
-                        parts: [{ functionCall: { args: '{"content": "repaired text"', name: "agw_emit_str" } }],
+                        parts: [{ functionCall: { args: '{"content": "repaired text"', name: "atg_emit_str" } }],
                         role: "model",
                     },
                     finishReason: "TOOL_CALLS",
@@ -167,7 +167,7 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
             ],
         };
 
-        const { response, stats } = ex.normalizeNonStreaming(resp, "agw_emit_str");
+        const { response, stats } = ex.normalizeNonStreaming(resp, "atg_emit_str");
         assert.strictEqual(stats.repaired, true);
         assert.deepStrictEqual(response.candidates[0].content.parts, [{ text: "repaired text" }]);
     });
@@ -177,19 +177,19 @@ describe("extractor.normalizeNonStreaming (contract from Go TestNormalizeNonStre
         const resp = {
             candidates: [
                 {
-                    content: { parts: [{ functionCall: { args: null, name: "agw_emit_bad" } }], role: "model" },
+                    content: { parts: [{ functionCall: { args: null, name: "atg_emit_bad" } }], role: "model" },
                     finishReason: "TOOL_CALLS",
                     index: 0,
                 },
             ],
         };
-        assert.throws(() => ex.normalizeNonStreaming(resp, "agw_emit_bad"));
+        assert.throws(() => ex.normalizeNonStreaming(resp, "atg_emit_bad"));
     });
 
     test("no candidates: passthrough untouched", () => {
         const ex = createExtractor(BASE_CFG);
         const resp = { promptFeedback: { blockReason: "SAFETY" } };
-        const { response } = ex.normalizeNonStreaming(resp, "agw_emit_x");
+        const { response } = ex.normalizeNonStreaming(resp, "atg_emit_x");
         assert.deepStrictEqual(response, resp);
     });
 

@@ -1,5 +1,5 @@
 /**
- * File: src/antigravity/injector.js
+ * File: src/atg/injector.js
  * Description: Request injector (Gemini format) — ported from Antigravity-gateway
  * internal/synthetic/injector.go, adapted to native Gemini body shape:
  *   contents[] / tools[].functionDeclarations[] / toolConfig.functionCallingConfig
@@ -62,7 +62,7 @@ function collectExistingNames(body) {
 }
 
 function createInjector(cfg) {
-    const prefix = cfg.syntheticToolPrefix || "agw_emit_";
+    const prefix = cfg.syntheticToolPrefix || "atg_emit_";
     const position = cfg.controlMessagePosition === "head" ? "head" : "tail";
     const strict = cfg.syntheticToolStrict === true;
     const modelFilter = cfg.modelFilter || createModelFilter("", "");

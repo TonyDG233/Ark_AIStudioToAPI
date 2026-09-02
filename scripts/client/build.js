@@ -446,17 +446,17 @@ class RequestProcessor {
                 try {
                     const bodyObj = JSON.parse(requestSpec.body);
 
-                    // --- Module 0.5: [AGW] Preserve synthetic transport tool declarations ---
-                    // The synthetic transport tool (AGW_TOOL_PREFIX, default agw_emit_) is injected
+                    // --- Module 0.5: [ATG] Preserve synthetic transport tool declarations ---
+                    // The synthetic transport tool (ATG_TOOL_PREFIX, default atg_emit_) is injected
                     // server-side; downstream tool-filtering modules must not remove it, so we
                     // snapshot its declarations here and restore them after filtering.
-                    const agwSyntheticDeclarations = [];
+                    const atgSyntheticDeclarations = [];
                     if (Array.isArray(bodyObj.tools)) {
                         for (const tool of bodyObj.tools) {
                             if (tool && Array.isArray(tool.functionDeclarations)) {
                                 for (const decl of tool.functionDeclarations) {
-                                    if (decl && typeof decl.name === "string" && decl.name.startsWith("agw_emit_")) {
-                                        agwSyntheticDeclarations.push(decl);
+                                    if (decl && typeof decl.name === "string" && decl.name.startsWith("atg_emit_")) {
+                                        atgSyntheticDeclarations.push(decl);
                                     }
                                 }
                             }
@@ -574,22 +574,22 @@ class RequestProcessor {
                         }
                     }
 
-                    // --- Module 4.5: [AGW] Restore synthetic transport tool declarations ---
-                    if (agwSyntheticDeclarations.length > 0) {
+                    // --- Module 4.5: [ATG] Restore synthetic transport tool declarations ---
+                    if (atgSyntheticDeclarations.length > 0) {
                         if (!Array.isArray(bodyObj.tools) || bodyObj.tools.length === 0) {
                             bodyObj.tools = [{ functionDeclarations: [] }];
                         }
-                        const agwTarget = bodyObj.tools[0];
-                        if (!Array.isArray(agwTarget.functionDeclarations)) {
-                            agwTarget.functionDeclarations = [];
+                        const atgTarget = bodyObj.tools[0];
+                        if (!Array.isArray(atgTarget.functionDeclarations)) {
+                            atgTarget.functionDeclarations = [];
                         }
-                        for (const decl of agwSyntheticDeclarations) {
-                            if (!agwTarget.functionDeclarations.some(d => d && d.name === decl.name)) {
-                                agwTarget.functionDeclarations.push(decl);
+                        for (const decl of atgSyntheticDeclarations) {
+                            if (!atgTarget.functionDeclarations.some(d => d && d.name === decl.name)) {
+                                atgTarget.functionDeclarations.push(decl);
                             }
                         }
                         Logger.debug(
-                            `[AGW] Restored ${agwSyntheticDeclarations.length} synthetic transport tool declaration(s) after filtering`
+                            `[ATG] Restored ${atgSyntheticDeclarations.length} synthetic transport tool declaration(s) after filtering`
                         );
                     }
 

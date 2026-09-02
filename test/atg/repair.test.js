@@ -1,11 +1,11 @@
 /**
- * File: test/antigravity/repair.test.js
+ * File: test/atg/repair.test.js
  * Description: TDD contract for repair.js — ported from Antigravity-gateway internal/synthetic/repair_test.go
  */
 const { describe, test } = require("node:test");
 const assert = require("node:assert");
 
-const { repairSyntheticArguments } = require("../../src/antigravity/repair");
+const { repairSyntheticArguments } = require("../../src/atg/repair");
 
 describe("repairSyntheticArguments (contract from Go TestRepairSyntheticArguments)", () => {
     const cases = [

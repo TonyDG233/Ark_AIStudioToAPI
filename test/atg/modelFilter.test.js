@@ -1,11 +1,11 @@
 /**
- * File: test/antigravity/modelFilter.test.js
+ * File: test/atg/modelFilter.test.js
  * Description: TDD contract for modelFilter.js — ported from Antigravity-gateway internal/synthetic/model_filter_test.go
  */
 const { describe, test } = require("node:test");
 const assert = require("node:assert");
 
-const { createModelFilter } = require("../../src/antigravity/modelFilter");
+const { createModelFilter } = require("../../src/atg/modelFilter");
 
 describe("modelFilter.IsTextModel (contract from Go TestModelFilterClassification)", () => {
     const filter = createModelFilter("", "");

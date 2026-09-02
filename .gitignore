@@ -36,8 +36,8 @@ temp/
 ui/dist/
 *.css
 test/*
-!test/antigravity/
-!test/antigravity/*.test.js
+!test/atg/
+!test/atg/*.test.js
 debug_*.png
 debug_*.html
 .local_logs

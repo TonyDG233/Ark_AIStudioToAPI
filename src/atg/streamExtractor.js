@@ -1,5 +1,5 @@
 /**
- * File: src/antigravity/streamExtractor.js
+ * File: src/atg/streamExtractor.js
  * Description: Per-chunk Gemini SSE stream transformer — ported from Antigravity-gateway
  * internal/synthetic/stream.go, adapted to Gemini chunk format:
  *   {"candidates":[{"index":0,"content":{"parts":[...]} or "finishReason":...}]}

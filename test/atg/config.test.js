@@ -1,26 +1,26 @@
 /**
- * File: test/antigravity/config.test.js
- * Description: TDD contract for config.js (AGW_* environment variables)
+ * File: test/atg/config.test.js
+ * Description: TDD contract for config.js (ATG_* environment variables)
  */
 const { describe, test, afterEach } = require("node:test");
 const assert = require("node:assert");
 
-const { loadAntigravityConfig } = require("../../src/antigravity/config");
+const { loadAtgConfig } = require("../../src/atg/config");
 
 const SAVED = { ...process.env };
 
 afterEach(() => {
     process.env = { ...SAVED };
     for (const key of Object.keys(process.env)) {
-        if (key.startsWith("AGW_")) delete process.env[key];
+        if (key.startsWith("ATG_")) delete process.env[key];
     }
 });
 
-describe("loadAntigravityConfig", () => {
+describe("loadAtgConfig", () => {
     test("defaults: mode off, no operation", () => {
-        const cfg = loadAntigravityConfig({});
+        const cfg = loadAtgConfig({});
         assert.strictEqual(cfg.mode, "off");
-        assert.strictEqual(cfg.toolPrefix, "agw_emit_");
+        assert.strictEqual(cfg.toolPrefix, "atg_emit_");
         assert.strictEqual(cfg.controlPosition, "tail");
         assert.strictEqual(cfg.emptyRetries, 2);
         assert.strictEqual(cfg.recovery, "repair");
@@ -28,27 +28,27 @@ describe("loadAntigravityConfig", () => {
         assert.strictEqual(cfg.enabled, false);
     });
 
-    test("AGW_MODE=prefer enables the module", () => {
-        process.env.AGW_MODE = "prefer";
-        const cfg = loadAntigravityConfig({});
+    test("ATG_MODE=prefer enables the module", () => {
+        process.env.ATG_MODE = "prefer";
+        const cfg = loadAtgConfig({});
         assert.strictEqual(cfg.enabled, true);
         assert.strictEqual(cfg.mode, "prefer");
     });
 
-    test("invalid AGW_MODE falls back to off with warning", () => {
-        process.env.AGW_MODE = "always";
-        const cfg = loadAntigravityConfig({});
+    test("invalid ATG_MODE falls back to off with warning", () => {
+        process.env.ATG_MODE = "always";
+        const cfg = loadAtgConfig({});
         assert.strictEqual(cfg.enabled, false);
     });
 
     test("custom values honored", () => {
-        process.env.AGW_MODE = "required";
-        process.env.AGW_TOOL_PREFIX = "agw_xmit_";
-        process.env.AGW_CONTROL_POSITION = "head";
-        process.env.AGW_EMPTY_RETRIES = "0";
-        process.env.AGW_RECOVERY = "fail";
-        process.env.AGW_SIDE_BUFFER_BYTES = "0";
-        const cfg = loadAntigravityConfig({});
+        process.env.ATG_MODE = "required";
+        process.env.ATG_TOOL_PREFIX = "agw_xmit_";
+        process.env.ATG_CONTROL_POSITION = "head";
+        process.env.ATG_EMPTY_RETRIES = "0";
+        process.env.ATG_RECOVERY = "fail";
+        process.env.ATG_SIDE_BUFFER_BYTES = "0";
+        const cfg = loadAtgConfig({});
         assert.strictEqual(cfg.mode, "required");
         assert.strictEqual(cfg.toolPrefix, "agw_xmit_");
         assert.strictEqual(cfg.controlPosition, "head");
@@ -58,15 +58,15 @@ describe("loadAntigravityConfig", () => {
     });
 
     test("precedence: explicit config object over env", () => {
-        process.env.AGW_MODE = "prefer";
-        const cfg = loadAntigravityConfig({ mode: "off" });
+        process.env.ATG_MODE = "prefer";
+        const cfg = loadAtgConfig({ mode: "off" });
         assert.strictEqual(cfg.mode, "off");
         assert.strictEqual(cfg.enabled, false);
     });
 
     test("non-text models skipped even in prefer mode", () => {
-        process.env.AGW_MODE = "prefer";
-        const cfg = loadAntigravityConfig({});
+        process.env.ATG_MODE = "prefer";
+        const cfg = loadAtgConfig({});
         assert.strictEqual(cfg.modelFilter.isTextModel("gemini-3.1-flash-image"), false);
         assert.strictEqual(cfg.modelFilter.isTextModel("gemini-3.5-flash-low"), true);
     });

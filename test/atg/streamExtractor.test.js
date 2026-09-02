@@ -1,5 +1,5 @@
 /**
- * File: test/antigravity/streamExtractor.test.js
+ * File: test/atg/streamExtractor.test.js
  * Description: TDD contract for streamDecoder.js (incremental JSON string) + streamExtractor.js
  *   (per-chunk Gemini SSE transformer)
  * Source contract: Antigravity-gateway internal/synthetic/stream_test.go + stream_decoder.go
@@ -8,8 +8,8 @@
 const { describe, test } = require("node:test");
 const assert = require("node:assert");
 
-const { IncrementalJSONStringDecoder } = require("../../src/antigravity/streamDecoder");
-const { createStreamExtractor } = require("../../src/antigravity/streamExtractor");
+const { IncrementalJSONStringDecoder } = require("../../src/atg/streamDecoder");
+const { createStreamExtractor } = require("../../src/atg/streamExtractor");
 
 const BASE_CFG = { maxResponseBytes: 1024 * 1024, sideBufferBytes: 0, wrapperMode: "prefer" };
 
@@ -89,15 +89,15 @@ describe("streamExtractor (Gemini SSE chunk transformer)", () => {
     }
 
     test("synthetic-only full args chunk -> text part, finishReason TOOL_CALLS -> STOP", () => {
-        const ex = createStreamExtractor(BASE_CFG, "agw_emit_stream123");
+        const ex = createStreamExtractor(BASE_CFG, "atg_emit_stream123");
         const chunk1 = parseChunk(
-            `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"agw_emit_stream123","args":{"content":"Streamed message content."}}}]}}]}`
+            `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"atg_emit_stream123","args":{"content":"Streamed message content."}}}]}}]}`
         );
         const finish = parseChunk(`{"candidates":[{"index":0,"finishReason":"TOOL_CALLS"}]}`);
 
         const r1 = ex.processChunk(chunk1);
         assert.strictEqual(r1.data.candidates[0].content.parts[0].text, "Streamed message content.");
-        assert.ok(!JSON.stringify(r1.data).includes("agw_emit_stream123"), "synthetic name must not leak");
+        assert.ok(!JSON.stringify(r1.data).includes("atg_emit_stream123"), "synthetic name must not leak");
 
         const r2 = ex.processChunk(finish);
         assert.strictEqual(r2.data.candidates[0].finishReason, "STOP");
@@ -106,7 +106,7 @@ describe("streamExtractor (Gemini SSE chunk transformer)", () => {
     });
 
     test("plain text streaming unaffected (no synthetic involved)", () => {
-        const ex = createStreamExtractor(BASE_CFG, "agw_emit_unused");
+        const ex = createStreamExtractor(BASE_CFG, "atg_emit_unused");
         const c1 = parseChunk(`{"candidates":[{"index":0,"content":{"parts":[{"text":"Hello "}]}}]}`);
         const c2 = parseChunk(`{"candidates":[{"index":0,"content":{"parts":[{"text":"world!"}]}}]}`);
         const c3 = parseChunk(`{"candidates":[{"index":0,"finishReason":"STOP"}]}`);
@@ -122,12 +122,12 @@ describe("streamExtractor (Gemini SSE chunk transformer)", () => {
     });
 
     test("direct streaming mode (sideBuffer 0): text flushed immediately; conflict flagged on synthetic hit", () => {
-        const ex = createStreamExtractor({ ...BASE_CFG, sideBufferBytes: 0 }, "agw_emit_stream_conf");
+        const ex = createStreamExtractor({ ...BASE_CFG, sideBufferBytes: 0 }, "atg_emit_stream_conf");
         const preamble = parseChunk(
             `{"candidates":[{"index":0,"content":{"parts":[{"text":"Standard preamble that was already flushed."}]}}]}`
         );
         const synth = parseChunk(
-            `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"agw_emit_stream_conf","args":{"content":"Real Answer"}}}]}}]}`
+            `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"atg_emit_stream_conf","args":{"content":"Real Answer"}}}]}}]}`
         );
 
         const r1 = ex.processChunk(preamble);
@@ -138,12 +138,12 @@ describe("streamExtractor (Gemini SSE chunk transformer)", () => {
     });
 
     test("buffered mode: preamble suppressed once synthetic hits (no leak)", () => {
-        const ex = createStreamExtractor({ ...BASE_CFG, sideBufferBytes: 4096 }, "agw_emit_stream_buf");
+        const ex = createStreamExtractor({ ...BASE_CFG, sideBufferBytes: 4096 }, "atg_emit_stream_buf");
         const preamble = parseChunk(
             `{"candidates":[{"index":0,"content":{"parts":[{"text":"Standard preamble that must be dropped."}]}}]}`
         );
         const synth = parseChunk(
-            `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"agw_emit_stream_buf","args":{"content":"Authoritative answer"}}}]}}]}`
+            `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"atg_emit_stream_buf","args":{"content":"Authoritative answer"}}}]}}]}`
         );
 
         const r1 = ex.processChunk(preamble);
@@ -154,7 +154,7 @@ describe("streamExtractor (Gemini SSE chunk transformer)", () => {
     });
 
     test("buffer flushes at end of stream when no synthetic ever arrives", () => {
-        const ex = createStreamExtractor({ ...BASE_CFG, sideBufferBytes: 4096 }, "agw_emit_none");
+        const ex = createStreamExtractor({ ...BASE_CFG, sideBufferBytes: 4096 }, "atg_emit_none");
         const c1 = parseChunk(`{"candidates":[{"index":0,"content":{"parts":[{"text":"Hello there"}]}}]}`);
         const c2 = parseChunk(`{"candidates":[{"index":0,"finishReason":"STOP"}]}`);
 
@@ -168,7 +168,7 @@ describe("streamExtractor (Gemini SSE chunk transformer)", () => {
     });
 
     test("thinking parts passthrough immediately, then synthetic answer", () => {
-        const ex = createStreamExtractor({ ...BASE_CFG, sideBufferBytes: 0 }, "agw_emit_stream_reason");
+        const ex = createStreamExtractor({ ...BASE_CFG, sideBufferBytes: 0 }, "atg_emit_stream_reason");
         const t1 = parseChunk(
             `{"candidates":[{"index":0,"content":{"parts":[{"text":"Thinking step 1...","thought":true}]}}]}`
         );
@@ -176,7 +176,7 @@ describe("streamExtractor (Gemini SSE chunk transformer)", () => {
             `{"candidates":[{"index":0,"content":{"parts":[{"text":"Thinking step 2.","thought":true}]}}]}`
         );
         const synth = parseChunk(
-            `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"agw_emit_stream_reason","args":{"content":"Final answer"}}}]}}]}`
+            `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"atg_emit_stream_reason","args":{"content":"Final answer"}}}]}}]}`
         );
 
         const r1 = ex.processChunk(t1);
@@ -188,9 +188,9 @@ describe("streamExtractor (Gemini SSE chunk transformer)", () => {
     });
 
     test("incremental functionCall args merged across chunks (same synthetic name)", () => {
-        const ex = createStreamExtractor(BASE_CFG, "agw_emit_stream_inc");
+        const ex = createStreamExtractor(BASE_CFG, "atg_emit_stream_inc");
         const c1 = parseChunk(
-            `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"agw_emit_stream_inc","args":{"content":"Part one "}}}]}}]}`
+            `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"atg_emit_stream_inc","args":{"content":"Part one "}}}]}}]}`
         );
         const c2 = parseChunk(
             `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"args":{"content":"part two"}}}]}}]}`
@@ -203,7 +203,7 @@ describe("streamExtractor (Gemini SSE chunk transformer)", () => {
     });
 
     test("real tool calls pass through untouched; finishReason TOOL_CALLS preserved", () => {
-        const ex = createStreamExtractor({ ...BASE_CFG, sideBufferBytes: 0 }, "agw_emit_stream_real");
+        const ex = createStreamExtractor({ ...BASE_CFG, sideBufferBytes: 0 }, "atg_emit_stream_real");
         const c1 = parseChunk(
             `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"city":"Beijing"}}}]}}]}`
         );
@@ -219,7 +219,7 @@ describe("streamExtractor (Gemini SSE chunk transformer)", () => {
     });
 
     test("usage-only chunk passthrough", () => {
-        const ex = createStreamExtractor(BASE_CFG, "agw_emit_stream_usage");
+        const ex = createStreamExtractor(BASE_CFG, "atg_emit_stream_usage");
         const c1 = parseChunk(`{"candidates":[{"index":0,"content":{"parts":[{"text":"Hi"}]}}]}`);
         const usage = parseChunk(`{"usageMetadata":{"totalTokenCount":15},"candidates":[]}`);
 

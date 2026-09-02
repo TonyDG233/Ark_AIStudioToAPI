@@ -1,7 +1,7 @@
 /**
- * File: src/antigravity/historyPurge.js
+ * File: src/atg/historyPurge.js
  * Description: Removes stale synthetic tool parts (functionCall/functionResponse with
- * AGW_TOOL_PREFIX names) from conversation history before fresh injection.
+ * ATG_TOOL_PREFIX names) from conversation history before fresh injection.
  * Rationale: each request generates a fresh nonce-based tool name, so any previously
  * injected synthetic calls in history are orphaned and must be purged.
  * Contents that end up with zero parts are dropped entirely (Gemini rejects empty parts).

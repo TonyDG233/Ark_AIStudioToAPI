@@ -1,5 +1,5 @@
 /**
- * File: src/antigravity/modelFilter.js
+ * File: src/atg/modelFilter.js
  * Description: Model classification filter — ported from Antigravity-gateway internal/synthetic/model_filter.go
  */
 const DEFAULT_NON_TEXT_REGEX =

@@ -1,21 +1,21 @@
 /**
- * File: test/antigravity/processor.test.js
- * Description: TDD contract for the AntigravityProcessor facade (src/antigravity/index.js)
+ * File: test/atg/processor.test.js
+ * Description: TDD contract for the AntigravityProcessor facade (src/atg/index.js)
  */
 const { describe, test, afterEach } = require("node:test");
 const assert = require("node:assert");
 
-const { createAntigravityProcessor } = require("../../src/antigravity/index");
+const { createAtgProcessor } = require("../../src/atg/index");
 
 afterEach(() => {
     for (const key of Object.keys(process.env)) {
-        if (key.startsWith("AGW_")) delete process.env[key];
+        if (key.startsWith("ATG_")) delete process.env[key];
     }
 });
 
-describe("createAntigravityProcessor", () => {
+describe("createAtgProcessor", () => {
     test("disabled by default: wrap/unwrap passthrough, no tool", () => {
-        const proc = createAntigravityProcessor();
+        const proc = createAtgProcessor();
         assert.strictEqual(proc.enabled, false);
 
         const body = { contents: [{ parts: [{ text: "hi" }], role: "user" }], model: "gemini-3.5-flash-low" };
@@ -29,30 +29,30 @@ describe("createAntigravityProcessor", () => {
     });
 
     test("enabled: full wrap pipeline purges stale history then injects", () => {
-        process.env.AGW_MODE = "prefer";
-        const proc = createAntigravityProcessor();
+        process.env.ATG_MODE = "prefer";
+        const proc = createAtgProcessor();
         assert.strictEqual(proc.enabled, true);
 
         const body = {
             contents: [
                 { parts: [{ text: "again" }], role: "user" },
-                { parts: [{ functionCall: { args: {}, name: "agw_emit_stale" } }], role: "model" },
+                { parts: [{ functionCall: { args: {}, name: "atg_emit_stale" } }], role: "model" },
             ],
             model: "gemini-3.5-flash-low",
         };
 
         const wrapped = proc.wrap(body);
         assert.strictEqual(wrapped.syntheticHit, true);
-        assert.ok(wrapped.toolName.startsWith("agw_emit_"));
+        assert.ok(wrapped.toolName.startsWith("atg_emit_"));
         assert.ok(
-            !JSON.stringify(wrapped.body.contents).includes("agw_emit_stale"),
+            !JSON.stringify(wrapped.body.contents).includes("atg_emit_stale"),
             "stale synthetic history purged before injection"
         );
     });
 
     test("wrap and unwrap round-trip: synthetic tool call becomes plain text", () => {
-        process.env.AGW_MODE = "prefer";
-        const proc = createAntigravityProcessor();
+        process.env.ATG_MODE = "prefer";
+        const proc = createAtgProcessor();
 
         const body = { contents: [{ parts: [{ text: "hello" }], role: "user" }], model: "gemini-3.5-flash-low" };
         const { toolName } = proc.wrap(body);
@@ -76,8 +76,8 @@ describe("createAntigravityProcessor", () => {
     });
 
     test("non-text model skips wrapping entirely", () => {
-        process.env.AGW_MODE = "prefer";
-        const proc = createAntigravityProcessor();
+        process.env.ATG_MODE = "prefer";
+        const proc = createAtgProcessor();
 
         const body = { contents: [{ parts: [{ text: "draw" }], role: "user" }], model: "gemini-3.1-flash-image" };
         const wrapped = proc.wrap(body);
@@ -86,8 +86,8 @@ describe("createAntigravityProcessor", () => {
     });
 
     test("Gemini body without top-level model field uses explicit model hint", () => {
-        process.env.AGW_MODE = "prefer";
-        const proc = createAntigravityProcessor();
+        process.env.ATG_MODE = "prefer";
+        const proc = createAtgProcessor();
 
         const body = {
             contents: [{ parts: [{ text: "hello" }], role: "user" }],
@@ -95,7 +95,7 @@ describe("createAntigravityProcessor", () => {
         };
         const wrapped = proc.wrap(body, "gemini-3.5-flash-low");
         assert.strictEqual(wrapped.syntheticHit, true, "text model via hint must be wrapped");
-        assert.ok(wrapped.toolName.startsWith("agw_emit_"));
+        assert.ok(wrapped.toolName.startsWith("atg_emit_"));
 
         const imageSkipped = proc.wrap({ ...body }, "gemini-3.1-flash-image");
         assert.strictEqual(imageSkipped.syntheticHit, false, "non-text model via hint must skip");
@@ -103,9 +103,9 @@ describe("createAntigravityProcessor", () => {
     });
 
     test("isSyntheticToolName guard", () => {
-        process.env.AGW_MODE = "prefer";
-        const proc = createAntigravityProcessor();
-        assert.strictEqual(proc.isSyntheticToolName("agw_emit_abcd"), true);
+        process.env.ATG_MODE = "prefer";
+        const proc = createAtgProcessor();
+        assert.strictEqual(proc.isSyntheticToolName("atg_emit_abcd"), true);
         assert.strictEqual(proc.isSyntheticToolName("get_weather"), false);
         assert.strictEqual(proc.isSyntheticToolName(null), false);
     });

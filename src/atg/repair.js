@@ -1,5 +1,5 @@
 /**
- * File: src/antigravity/repair.js
+ * File: src/atg/repair.js
  * Description: Deterministic repair of synthetic tool arguments — ported from
  * Antigravity-gateway internal/synthetic/repair.go
  */

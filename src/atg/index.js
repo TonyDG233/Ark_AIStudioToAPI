@@ -1,18 +1,18 @@
 /**
- * File: src/antigravity/index.js
- * Description: AntigravityProcessor facade — assembles config, injector, extractors
+ * File: src/atg/index.js
+ * Description: ATG (Anti-Truncation Gateway) facade — assembles config, injector, extractors
  * and history purge into the single entry point used by RequestHandler.
  * Provides the complete post-processing pipeline for the synthetic transport tool:
  *   wrap request  ->  upstream (AI Studio)  ->  unwrap stream/non-stream  ->  client
  */
-const { loadAntigravityConfig } = require("./config");
+const { loadAtgConfig } = require("./config");
 const { createInjector } = require("./injector");
 const { createExtractor } = require("./extractor");
 const { createStreamExtractor } = require("./streamExtractor");
 const { purgeSyntheticHistory } = require("./historyPurge");
 
-function createAntigravityProcessor(cfgOverrides = {}) {
-    const cfg = loadAntigravityConfig(cfgOverrides);
+function createAtgProcessor(cfgOverrides = {}) {
+    const cfg = loadAtgConfig(cfgOverrides);
     let injector = null;
     let extractor = null;
 
@@ -69,4 +69,4 @@ function createAntigravityProcessor(cfgOverrides = {}) {
     };
 }
 
-module.exports = { createAntigravityProcessor };
+module.exports = { createAtgProcessor };

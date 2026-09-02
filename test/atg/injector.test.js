@@ -1,5 +1,5 @@
 /**
- * File: test/antigravity/injector.test.js
+ * File: test/atg/injector.test.js
  * Description: TDD contract for injector.js (Gemini-format adaptation)
  * Source contract: Antigravity-gateway internal/synthetic/injector_test.go
  * Adaptation: operates on native Gemini body (contents / tools[].functionDeclarations / toolConfig)
@@ -8,11 +8,11 @@
 const { describe, test } = require("node:test");
 const assert = require("node:assert");
 
-const { createInjector } = require("../../src/antigravity/injector");
+const { createInjector } = require("../../src/atg/injector");
 
 const BASE_CFG = {
     controlMessagePosition: "tail",
-    syntheticToolPrefix: "agw_emit_",
+    syntheticToolPrefix: "atg_emit_",
     syntheticToolStrict: false,
     wrapperMode: "prefer",
 };
@@ -28,8 +28,8 @@ describe("injector.injectGemini (contract from Go TestRequestInjector*)", () => 
         const { body: out, toolName, syntheticHit } = inj.injectGemini(body);
 
         assert.strictEqual(syntheticHit, true);
-        assert.ok(toolName.startsWith("agw_emit_"));
-        assert.strictEqual(toolName.length, "agw_emit_".length + 24, "96-bit nonce = 24 hex chars");
+        assert.ok(toolName.startsWith("atg_emit_"));
+        assert.strictEqual(toolName.length, "atg_emit_".length + 24, "96-bit nonce = 24 hex chars");
 
         assert.ok(Array.isArray(out.tools), "tools must exist");
         const declarations = out.tools[0].functionDeclarations;
@@ -139,14 +139,14 @@ describe("injector.injectGemini (contract from Go TestRequestInjector*)", () => 
             tools: [
                 {
                     functionDeclarations: [
-                        { name: "agw_emit_000000000000000000000000", parameters: { type: "OBJECT" } },
+                        { name: "atg_emit_000000000000000000000000", parameters: { type: "OBJECT" } },
                     ],
                 },
             ],
         };
 
         const { body: out, toolName } = inj.injectGemini(body);
-        assert.notStrictEqual(toolName, "agw_emit_000000000000000000000000");
+        assert.notStrictEqual(toolName, "atg_emit_000000000000000000000000");
         const names = out.tools[0].functionDeclarations.map(d => d.name);
         assert.strictEqual(new Set(names).size, names.length, "no duplicate tool names");
     });

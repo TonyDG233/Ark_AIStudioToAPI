@@ -1,5 +1,5 @@
 /**
- * File: src/antigravity/streamDecoder.js
+ * File: src/atg/streamDecoder.js
  * Description: Incremental JSON string decoder — ported 1:1 from Antigravity-gateway
  * internal/synthetic/stream_decoder.go.
  * Operates on byte-stream semantics: feed chunks are treated as latin1-encoded bytes

@@ -1,5 +1,5 @@
 /**
- * File: src/antigravity/extractor.js
+ * File: src/atg/extractor.js
  * Description: Non-streaming response normalizer (Gemini format) — ported from
  * Antigravity-gateway internal/synthetic/normalizer.go, adapted to Gemini
  * candidates[].content.parts[] with functionCall parts (args may be object or
