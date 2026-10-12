@@ -15,6 +15,7 @@ const ResponsesHandler = require("./ResponsesHandler");
 const ClaudeHandler = require("./ClaudeHandler");
 const ErrorHandler = require("./ErrorHandler");
 const TransportHandler = require("./TransportHandler");
+const AtgHandler = require("./AtgHandler");
 
 for (const Handler of [
     ConnectionHandler,
@@ -27,6 +28,7 @@ for (const Handler of [
     ClaudeHandler,
     ErrorHandler,
     TransportHandler,
+    AtgHandler,
 ]) {
     const methods = Object.getOwnPropertyDescriptors(Handler.prototype);
     delete methods.constructor;

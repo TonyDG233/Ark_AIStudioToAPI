@@ -304,12 +304,33 @@ class ChatCompletionsHandler extends RetryHandler {
 
     async _streamOpenAIResponse(messageQueue, res, model, requestId) {
         const streamState = {};
+        const atgUnwrapper = this._createAtgStreamUnwrapper(res);
 
         try {
             // eslint-disable-next-line no-constant-condition
             while (true) {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (message.type === "STREAM_END") {
+                    if (atgUnwrapper) {
+                        const flush = atgUnwrapper.finish();
+                        if (flush && flush.data && this._isResponseWritable(res)) {
+                            try {
+                                const openAIFlush = this.formatConverter.translateGoogleToOpenAIStream(
+                                    JSON.stringify(flush.data),
+                                    model,
+                                    streamState
+                                );
+                                if (openAIFlush) {
+                                    res.write(openAIFlush);
+                                }
+                            } catch (flushError) {
+                                this.logger.debug(
+                                    `[ATG] failed to forward flushed chunk to OpenAI stream: ${flushError.message}`
+                                );
+                            }
+                        }
+                        this.logger.debug(`[ATG] stream done (openai): stats=${JSON.stringify(atgUnwrapper.stats)}`);
+                    }
                     if (this._isResponseWritable(res)) {
                         try {
                             res.write("data: [DONE]\n\n");
@@ -343,11 +364,14 @@ class ChatCompletionsHandler extends RetryHandler {
                 }
 
                 if (message.data) {
-                    const openAIChunk = this.formatConverter.translateGoogleToOpenAIStream(
-                        message.data,
-                        model,
-                        streamState
-                    );
+                    let data = message.data;
+                    if (atgUnwrapper) {
+                        data = this._processAtgStreamData(data, atgUnwrapper, "openai");
+                        if (data === null) {
+                            continue;
+                        }
+                    }
+                    const openAIChunk = this.formatConverter.translateGoogleToOpenAIStream(data, model, streamState);
                     if (openAIChunk) {
                         if (!this._isResponseWritable(res)) {
                             this.logger.debug(
@@ -403,7 +427,7 @@ class ChatCompletionsHandler extends RetryHandler {
 
         // Parse and convert to OpenAI format
         try {
-            const googleResponse = JSON.parse(fullBody);
+            const googleResponse = this._unwrapAtgNonStreamResponse(JSON.parse(fullBody), res, "openai");
             const openAIResponse = this.formatConverter.convertGoogleToOpenAINonStream(googleResponse, model);
             res.type("application/json").send(JSON.stringify(openAIResponse));
             this.logger.info(`✅ [Request] Response completed (OpenAI non-stream), request ID: ${requestId}`);
