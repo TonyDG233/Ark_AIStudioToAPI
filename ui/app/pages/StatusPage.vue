@@ -2970,7 +2970,8 @@ const statsState = reactive({
 });
 
 // Time range filter: 'all' | '1h' | '6h' | '24h' | '7d' | '30d' | 'custom'
-const timeRange = ref("all");
+const DEFAULT_TIME_RANGE = "30d";
+const timeRange = ref(DEFAULT_TIME_RANGE);
 const customTimeRange = ref([]);
 const recordFilters = reactive({
     apiFormat: [""],
@@ -3209,7 +3210,8 @@ const recordFilterOptions = computed(() => {
 });
 
 const hasActiveStatsFilters = computed(
-    () => timeRange.value !== "all" || Object.values(recordFilters).some(value => isFilterArrayActive(value))
+    () =>
+        timeRange.value !== DEFAULT_TIME_RANGE || Object.values(recordFilters).some(value => isFilterArrayActive(value))
 );
 
 // Computed: records filtered by time range + record filters (records are newest-first)
@@ -3575,8 +3577,21 @@ const formatAccount = (authIndex, accountName) => {
     }
     return `#${authIndex} ${accountName || "N/A"}`;
 };
+let usageStatsRequestSequence = 0;
 const fetchUsageStats = async () => {
-    const res = await fetch("/api/usage-stats");
+    const requestSequence = ++usageStatsRequestSequence;
+    let url = "/api/usage-stats";
+    const range =
+        timeRange.value === "custom" ? normalizedCustomTimeRange.value : buildRelativeTimeRange(timeRange.value);
+    if (range) {
+        const params = new URLSearchParams({
+            endTime: range[1].toISOString(),
+            startTime: range[0].toISOString(),
+        });
+        url += `?${params.toString()}`;
+    }
+
+    const res = await fetch(url);
     if (res.redirected) {
         window.location.href = res.url;
         return;
@@ -3590,6 +3605,7 @@ const fetchUsageStats = async () => {
     }
 
     const data = await res.json();
+    if (requestSequence !== usageStatsRequestSequence) return;
     statsState.accounts = data.accounts || [];
     statsState.records = data.records || [];
     statsState.startedAt = data.startedAt || null;
@@ -3648,7 +3664,7 @@ const showAttemptsDetail = record => {
 };
 
 const resetRecordFilters = () => {
-    timeRange.value = "all";
+    timeRange.value = DEFAULT_TIME_RANGE;
     customTimeRange.value = [];
     recordFilters.apiFormat = [""];
     recordFilters.attemptCount = [""];
@@ -3670,6 +3686,12 @@ watch(
     },
     { flush: "sync" }
 );
+
+watch([timeRange, normalizedCustomTimeRange], () => {
+    fetchUsageStats().catch(err => {
+        console.error("Error fetching usage stats:", err.message || err);
+    });
+});
 
 watch(
     [() => filteredRecords.value.length, recordsPageSize],
@@ -5208,8 +5230,7 @@ onMounted(() => {
     syncStatsFiltersViewport(statsFiltersMobileMediaQuery);
     statsFiltersMobileMediaQuery.addEventListener("change", syncStatsFiltersViewport);
 
-    updateContent().finally(scheduleUpdate);
-    fetchUsageStats().finally(scheduleUpdate);
+    Promise.all([updateContent(), fetchUsageStats()]).finally(scheduleUpdate);
 
     // Check for updates once on initial load
     checkForUpdates();

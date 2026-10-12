@@ -9,6 +9,33 @@ const fs = require("fs");
 const path = require("path");
 const { getProxySummaryFromEnv } = require("./ProxyUtils");
 
+const DEFAULT_AI_STUDIO_APP_URL = "https://ai.studio/apps/56128c84-c8e6-4d52-bf94-934c836720d9";
+
+function parseAiStudioAppUrl(value) {
+    const rawValue = String(value || "").trim();
+    if (!rawValue) return null;
+
+    try {
+        const url = new URL(rawValue);
+        const pathSegments = url.pathname.split("/").filter(Boolean);
+        if (
+            url.protocol !== "https:" ||
+            url.hostname !== "ai.studio" ||
+            url.username ||
+            url.password ||
+            url.search ||
+            url.hash ||
+            pathSegments.length !== 2 ||
+            pathSegments[0] !== "apps"
+        ) {
+            return null;
+        }
+        return `https://ai.studio/apps/${pathSegments[1]}`;
+    } catch {
+        return null;
+    }
+}
+
 /**
  * Configuration Loader Module
  * Responsible for loading system configuration from environment variables
@@ -20,6 +47,7 @@ class ConfigLoader {
 
     loadConfiguration() {
         const config = {
+            aiStudioAppUrl: DEFAULT_AI_STUDIO_APP_URL,
             apiKeys: [],
             apiKeySource: "Not set",
             autoSwitchIntervalHours: 3,
@@ -49,6 +77,17 @@ class ConfigLoader {
         };
 
         // Environment variable overrides
+        if (process.env.AI_STUDIO_APP_URL) {
+            const aiStudioAppUrl = parseAiStudioAppUrl(process.env.AI_STUDIO_APP_URL);
+            if (aiStudioAppUrl) {
+                config.aiStudioAppUrl = aiStudioAppUrl;
+            } else {
+                this.logger.warn(
+                    `[Config] Invalid AI_STUDIO_APP_URL "${process.env.AI_STUDIO_APP_URL}". ` +
+                        `Expected https://ai.studio/apps/<app-id>; using the default app.`
+                );
+            }
+        }
         if (process.env.PORT) {
             const parsed = parseInt(process.env.PORT, 10);
             config.httpPort = Number.isFinite(parsed) ? parsed : config.httpPort;
@@ -186,17 +225,17 @@ class ConfigLoader {
                     );
                 } else {
                     this.logger.warn(`[System] models.json is not in the expected format, using default model list.`);
-                    config.modelList = [{ name: "models/gemini-2.5-flash-lite" }];
+                    config.modelList = [{ name: "models/gemini-flash-lite-latest" }];
                 }
             } else {
                 this.logger.warn(`[System] models.json file not found, using default model list.`);
-                config.modelList = [{ name: "models/gemini-2.5-flash-lite" }];
+                config.modelList = [{ name: "models/gemini-flash-lite-latest" }];
             }
         } catch (error) {
             this.logger.error(
                 `[System] Failed to read or parse models.json: ${error.message}, using default model list.`
             );
-            config.modelList = [{ name: "models/gemini-2.5-flash-lite" }];
+            config.modelList = [{ name: "models/gemini-flash-lite-latest" }];
         }
 
         this._printConfiguration(config);
@@ -207,6 +246,7 @@ class ConfigLoader {
         this.logger.info("================ [ Active Configuration ] ================");
         this.logger.info(`  HTTP Server Port: ${config.httpPort}`);
         this.logger.info(`  Listening Address: ${config.host}`);
+        this.logger.info(`  AI Studio App URL: ${config.aiStudioAppUrl}`);
         this.logger.info(`  Streaming Mode: ${config.streamingMode}`);
         this.logger.info(`  Stream Timeout: ${config.streamTimeoutMs}ms`);
         this.logger.info(`  Fake/Non-Stream Timeout: ${config.fakeStreamTimeoutMs}ms`);

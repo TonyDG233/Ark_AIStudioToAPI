@@ -79,7 +79,7 @@ class BrowserManager {
         this._wsInitState = new Map();
 
         // Target URL for AI Studio app
-        this.targetUrl = "https://ai.studio/apps/cab9ab6c-44f9-4e7a-8972-037f8ae177ab";
+        this.targetUrl = config.aiStudioAppUrl;
 
         // Firefox/Camoufox does not use Chromium-style command line args.
         // We keep this empty; Camoufox has its own anti-fingerprinting optimizations built-in.
@@ -187,7 +187,7 @@ class BrowserManager {
 
     /**
      * Helper: Check for page errors that require refresh
-     * @returns {Object} Object with error flags
+     * @returns {Promise<Object>} Object with error flags
      */
     async _checkPageErrors(page) {
         try {
@@ -2433,17 +2433,8 @@ class BrowserManager {
     }
 
     /**
-     * Lightweight Reconnect: Refreshes the page and clicks "Continue to the app" button
-     * without restarting the entire browser instance.
-     *
-     * This method is called when WebSocket connection is lost but the browser
-     * process is still running. It's much faster than a full browser restart.
-     *
-     * @returns {Promise<boolean>} true if reconnect was successful, false otherwise
-     */
-    /**
-     * Attempt lightweight reconnect for a specific account
-     * Refreshes the page and re-injects the proxy script without restarting the browser
+     * Attempt a lightweight reconnect for a specific account by refreshing the page
+     * and re-injecting the proxy script without restarting the browser.
      * @param {number} authIndex - The auth index to reconnect (defaults to current if not specified)
      * @returns {Promise<boolean>} true if reconnect was successful, false otherwise
      */
