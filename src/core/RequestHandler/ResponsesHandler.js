@@ -537,12 +537,38 @@ class ResponsesHandler extends RetryHandler {
         // Keep Response API sequence numbers consistent across helpers that might write to the same SSE response.
         if (res.__responseApiSeq == null) res.__responseApiSeq = -1;
         streamState.sequenceNumber = res.__responseApiSeq;
+        const atgUnwrapper = this._createAtgStreamUnwrapper(res);
 
         try {
             // eslint-disable-next-line no-constant-condition
             while (true) {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (message.type === "STREAM_END") {
+                    if (atgUnwrapper) {
+                        const flush = atgUnwrapper.finish();
+                        if (flush && flush.data && this._isResponseWritable(res)) {
+                            try {
+                                const responseAPIFlush = this.formatConverter.translateGoogleToResponseAPIStream(
+                                    JSON.stringify(flush.data),
+                                    model,
+                                    streamState
+                                );
+                                if (typeof streamState.sequenceNumber === "number") {
+                                    res.__responseApiSeq = streamState.sequenceNumber;
+                                }
+                                if (responseAPIFlush) {
+                                    res.write(responseAPIFlush);
+                                }
+                            } catch (flushError) {
+                                this.logger.debug(
+                                    `[ATG] failed to forward flushed chunk to Response API stream: ${flushError.message}`
+                                );
+                            }
+                        }
+                        this.logger.debug(
+                            `[ATG] stream done (response_api): stats=${JSON.stringify(atgUnwrapper.stats)}`
+                        );
+                    }
                     this.logger.info(
                         `✅ [Request] Response completed (OpenAI Response API real stream), request ID: ${requestId}`
                     );
@@ -576,8 +602,15 @@ class ResponsesHandler extends RetryHandler {
                 }
 
                 if (message.data) {
+                    let data = message.data;
+                    if (atgUnwrapper) {
+                        data = this._processAtgStreamData(data, atgUnwrapper, "response_api");
+                        if (data === null) {
+                            continue;
+                        }
+                    }
                     const responseAPIChunk = this.formatConverter.translateGoogleToResponseAPIStream(
-                        message.data,
+                        data,
                         model,
                         streamState
                     );
@@ -649,7 +682,7 @@ class ResponsesHandler extends RetryHandler {
 
         // Parse and convert to OpenAI Response API format
         try {
-            const googleResponse = JSON.parse(fullBody);
+            const googleResponse = this._unwrapAtgNonStreamResponse(JSON.parse(fullBody), res, "openai-response");
             const responseAPIResponse = this.formatConverter.convertGoogleToResponseAPINonStream(
                 googleResponse,
                 model,

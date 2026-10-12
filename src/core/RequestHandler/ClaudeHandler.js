@@ -428,6 +428,7 @@ class ClaudeHandler extends RetryHandler {
 
     async _streamClaudeResponse(messageQueue, res, model, requestId) {
         const streamState = {};
+        const atgUnwrapper = this._createAtgStreamUnwrapper(res);
 
         try {
             // eslint-disable-next-line no-constant-condition
@@ -435,6 +436,26 @@ class ClaudeHandler extends RetryHandler {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
 
                 if (message.type === "STREAM_END") {
+                    if (atgUnwrapper) {
+                        const flush = atgUnwrapper.finish();
+                        if (flush && flush.data && this._isResponseWritable(res)) {
+                            try {
+                                const claudeFlush = this.formatConverter.translateGoogleToClaudeStream(
+                                    JSON.stringify(flush.data),
+                                    model,
+                                    streamState
+                                );
+                                if (claudeFlush) {
+                                    res.write(claudeFlush);
+                                }
+                            } catch (flushError) {
+                                this.logger.debug(
+                                    `[ATG] failed to forward flushed chunk to Claude stream: ${flushError.message}`
+                                );
+                            }
+                        }
+                        this.logger.debug(`[ATG] stream done (claude): stats=${JSON.stringify(atgUnwrapper.stats)}`);
+                    }
                     this.logger.info(`✅ [Request] Response completed (Claude real stream), request ID: ${requestId}`);
                     break;
                 }
@@ -465,11 +486,14 @@ class ClaudeHandler extends RetryHandler {
                 }
 
                 if (message.data) {
-                    const claudeChunk = this.formatConverter.translateGoogleToClaudeStream(
-                        message.data,
-                        model,
-                        streamState
-                    );
+                    let data = message.data;
+                    if (atgUnwrapper) {
+                        data = this._processAtgStreamData(data, atgUnwrapper, "claude");
+                        if (data === null) {
+                            continue;
+                        }
+                    }
+                    const claudeChunk = this.formatConverter.translateGoogleToClaudeStream(data, model, streamState);
                     if (streamState.error) this._markTrackedResponseError(res, streamState.error.message, 400);
                     if (claudeChunk) {
                         // Before writing, ensure the response is still writable to avoid
@@ -529,7 +553,7 @@ class ClaudeHandler extends RetryHandler {
         }
 
         try {
-            const googleResponse = JSON.parse(fullBody);
+            const googleResponse = this._unwrapAtgNonStreamResponse(JSON.parse(fullBody), res, "claude");
             const claudeResponse = this.formatConverter.convertGoogleToClaudeNonStream(googleResponse, model);
             res.type("application/json").send(JSON.stringify(claudeResponse));
             this.logger.info(`✅ [Request] Response completed (Claude non-stream), request ID: ${requestId}`);
