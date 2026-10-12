@@ -38,6 +38,14 @@ class RetryHandler extends ConnectionHandler {
         const useRealStream = isStreaming && effectiveStreamMode === "real";
         const streamMode = useRealStream ? "real" : "fake";
         const googleEndpoint = useRealStream ? "streamGenerateContent" : "generateContent";
+
+        // [ATG] optional synthetic transport tool wrap (ATG_MODE=prefer/required).
+        // Single injection point shared by the OpenAI, Response API and Claude flows;
+        // retries reuse the same res.__atgToolName below.
+        const atgWrap = this._applyAtgWrap(googleBody, res.__proxyApiFormat || "generation", model);
+        googleBody = atgWrap.body;
+        res.__atgToolName = atgWrap.toolName || "";
+
         const proxyRequest = {
             body: JSON.stringify(googleBody),
             headers: { "Content-Type": "application/json" },

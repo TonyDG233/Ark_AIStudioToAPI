@@ -110,7 +110,8 @@ class ProxyServerSystem extends EventEmitter {
          * import("./RequestHandler/ResponsesHandler") &
          * import("./RequestHandler/ClaudeHandler") &
          * import("./RequestHandler/ErrorHandler") &
-         * import("./RequestHandler/TransportHandler")}
+         * import("./RequestHandler/TransportHandler") &
+         * import("./RequestHandler/AtgHandler")}
          */ (
             new RequestHandler(
                 this,
