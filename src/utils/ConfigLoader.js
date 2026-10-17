@@ -50,6 +50,12 @@ class ConfigLoader {
             aiStudioAppUrl: DEFAULT_AI_STUDIO_APP_URL,
             apiKeys: [],
             apiKeySource: "Not set",
+            atgClientSyntheticGuard: true,
+            atgModeByFormat: {
+                claude: "inherit",
+                gemini: "inherit",
+                openai: "inherit",
+            },
             autoSwitchIntervalHours: 3,
             browserExecutablePath: null,
             checkUpdate: true,
@@ -66,6 +72,8 @@ class ConfigLoader {
             host: "0.0.0.0",
             httpPort: 7860,
             immediateSwitchStatusCodes: [429, 503],
+            makerSuiteDirect: false,
+            makerSuiteDirectFallback: false,
             maxContexts: 1,
             maxRetries: 3,
             retryDelay: 2000,
@@ -94,6 +102,25 @@ class ConfigLoader {
         }
         if (process.env.HOST) config.host = process.env.HOST;
         if (process.env.STREAMING_MODE) config.streamingMode = process.env.STREAMING_MODE;
+
+        // Direct signer channel + ATG runtime switches (UI-togglable; env sets the baseline)
+        if (process.env.MAKERSUITE_DIRECT) {
+            config.makerSuiteDirect = process.env.MAKERSUITE_DIRECT.toLowerCase() === "on";
+        }
+        if (process.env.MAKERSUITE_DIRECT_FALLBACK) {
+            config.makerSuiteDirectFallback = process.env.MAKERSUITE_DIRECT_FALLBACK.toLowerCase() === "on";
+        }
+        if (process.env.ATG_CLIENT_SYNTHETIC_GUARD) {
+            config.atgClientSyntheticGuard = process.env.ATG_CLIENT_SYNTHETIC_GUARD.toLowerCase() !== "off";
+        }
+        for (const atgFormat of ["gemini", "openai", "claude"]) {
+            const atgFormatMode = String(process.env[`ATG_MODE_${atgFormat.toUpperCase()}`] || "")
+                .trim()
+                .toLowerCase();
+            if (["off", "prefer", "required"].includes(atgFormatMode)) {
+                config.atgModeByFormat[atgFormat] = atgFormatMode;
+            }
+        }
         if (process.env.FAILURE_THRESHOLD) {
             const parsed = parseInt(process.env.FAILURE_THRESHOLD, 10);
             config.failureThreshold = Number.isFinite(parsed) ? Math.max(0, parsed) : config.failureThreshold;
@@ -248,6 +275,12 @@ class ConfigLoader {
         this.logger.info(`  Listening Address: ${config.host}`);
         this.logger.info(`  AI Studio App URL: ${config.aiStudioAppUrl}`);
         this.logger.info(`  Streaming Mode: ${config.streamingMode}`);
+        this.logger.info(`  Direct Signer (MAKERSUITE_DIRECT): ${config.makerSuiteDirect ? "on" : "off"}`);
+        this.logger.info(
+            `  ATG mode by format: ${JSON.stringify(config.atgModeByFormat)} (global via ATG_MODE); client guard: ${
+                config.atgClientSyntheticGuard ? "on" : "off"
+            }`
+        );
         this.logger.info(`  Stream Timeout: ${config.streamTimeoutMs}ms`);
         this.logger.info(`  Fake/Non-Stream Timeout: ${config.fakeStreamTimeoutMs}ms`);
         this.logger.info(`  Force Thinking: ${config.forceThinking}`);
