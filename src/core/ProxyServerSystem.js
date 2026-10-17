@@ -19,6 +19,7 @@ const LoggingService = require("../utils/LoggingService");
 const AuthSource = require("../auth/AuthSource");
 const BrowserManager = require("./BrowserManager");
 const ConnectionRegistry = require("./ConnectionRegistry");
+const DirectSignerService = require("./DirectSignerService");
 const RequestHandler = require("./RequestHandler");
 const UsageStatsService = require("./UsageStatsService");
 const ConfigLoader = require("../utils/ConfigLoader");
@@ -99,6 +100,16 @@ class ProxyServerSystem extends EventEmitter {
         // Set ConnectionRegistry reference in BrowserManager to avoid circular dependency
         this.browserManager.setConnectionRegistry(this.connectionRegistry);
 
+        // Direct signer service: page-held WebSocket + no-interception streaming path.
+        // Disabled unless MAKERSUITE_DIRECT=on; the native path stays the default.
+        this.directSignerService = new DirectSignerService({
+            config: this.config,
+            connectionRegistry: this.connectionRegistry,
+            logger: this.logger,
+        });
+        this.browserManager.setDirectSigner(this.directSignerService);
+        this.directSignerService.attachBrowserManager(this.browserManager);
+
         // index.js mounts the request/response modules onto this instance's prototype at runtime.
         this.requestHandler = /** @type {RequestHandler &
          * import("./RequestHandler/ConnectionHandler") &
@@ -122,6 +133,7 @@ class ProxyServerSystem extends EventEmitter {
                 this.authSource
             )
         );
+        this.requestHandler.directSignerService = this.directSignerService;
         this.browserManager.setSystemBusyProvider(() => this.requestHandler?.isSystemBusy === true);
 
         this.httpServer = null;
@@ -744,6 +756,14 @@ class ProxyServerSystem extends EventEmitter {
                         `[System] Rejecting WebSocket connection with invalid authIndex: ${authIndexParam} (parsed as ${authIndex})`
                     );
                     this._safeCloseWebSocket(ws, 1008, "Invalid authIndex: must be a non-negative integer");
+                    return;
+                }
+
+                // role=signer: the main-page direct signer script (MAKERSUITE_DIRECT).
+                // It is not a build.js client and must not enter the per-account
+                // connection registry; tasks are routed by DirectSignerService.
+                if (url.searchParams.get("role") === "signer") {
+                    this.directSignerService.registerConnection(ws, authIndex, req);
                     return;
                 }
 

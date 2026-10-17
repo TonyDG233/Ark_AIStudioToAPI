@@ -74,6 +74,8 @@ class TransportHandler extends RequestHandler {
     }
 
     _cancelBrowserRequest(requestId, authIndex, requestAttemptId = null) {
+        // Direct signer tasks are cancelled through the signer WebSocket instead
+        this.directSignerService?.cancel(requestId, requestAttemptId, authIndex);
         const targetAuthIndex = authIndex !== undefined ? authIndex : this.currentAuthIndex;
         const connection = this.connectionRegistry.getConnectionByAuth(targetAuthIndex);
         if (connection) {
@@ -124,6 +126,13 @@ class TransportHandler extends RequestHandler {
     }
 
     _forwardRequest(proxyRequest, authIndex = this.currentAuthIndex) {
+        // Direct signer path (MAKERSUITE_DIRECT=on): direct-candidate generations ride
+        // the page signer's WebSocket and stream frames back through the same message
+        // queue pipeline. Non-candidates (or opted-in auto-fallback) continue on the
+        // native browser connection below; channel problems are refused explicitly.
+        if (this.directSignerService?.maybeHandleTask(proxyRequest, authIndex)) {
+            return;
+        }
         const connection = this.connectionRegistry.getConnectionByAuth(authIndex);
         if (connection) {
             this.logger.debug(

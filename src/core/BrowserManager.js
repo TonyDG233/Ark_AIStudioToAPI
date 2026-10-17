@@ -155,6 +155,14 @@ class BrowserManager {
      * Set the ConnectionRegistry reference (called after construction to avoid circular dependency)
      * @param {ConnectionRegistry} connectionRegistry - The ConnectionRegistry instance
      */
+    /**
+     * Set the DirectSignerService reference (called after construction to avoid circular dependency)
+     * @param {import("./DirectSignerService")} directSigner - The DirectSignerService instance
+     */
+    setDirectSigner(directSigner) {
+        this.directSigner = directSigner;
+    }
+
     setConnectionRegistry(connectionRegistry) {
         if (this.connectionRegistry && this._onAuthQueuesDrained) {
             this.connectionRegistry.off("authQueuesDrained", this._onAuthQueuesDrained);
@@ -2082,6 +2090,18 @@ class BrowserManager {
             await context.addInitScript(privacyScript);
 
             page = await context.newPage();
+
+            // Direct signer pipeline (MAKERSUITE_DIRECT=on): install the page script
+            // before the first navigation so the main-realm hook and its WebSocket
+            // are in place when the Studio bundle loads. Inert when disabled.
+            if (this.directSigner?.enabled) {
+                try {
+                    await page.addInitScript({ content: this.directSigner.buildInitScript(authIndex) });
+                    this.logger.info(`[Context#${authIndex}] Direct signer page script installed`);
+                } catch (e) {
+                    this.logger.warn(`[Context#${authIndex}] Direct signer injection failed: ${e.message}`);
+                }
+            }
 
             // Pure JS Wakeup (Focus & Mouse Movement)
             // Skip focus operations for background tasks to avoid window focus conflicts

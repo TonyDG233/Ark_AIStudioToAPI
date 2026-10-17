@@ -247,37 +247,50 @@ class ConnectionRegistry extends EventEmitter {
     _handleIncomingMessage(messageData, messageAuthIndex) {
         try {
             const parsedMessage = JSON.parse(messageData);
-            const requestId = parsedMessage.request_id;
-            if (!requestId) {
-                this.logger.warn("[Server] Received invalid message: missing request_id");
-                return;
-            }
-            const entry = this.messageQueues.get(requestId);
-            if (entry) {
-                // Verify that the message comes from the correct authIndex
-                if (messageAuthIndex !== entry.authIndex) {
-                    this.logger.warn(
-                        `[Server] Received message for request ${requestId} from wrong account: ` +
-                            `expected authIndex=${entry.authIndex}, got authIndex=${messageAuthIndex}. ` +
-                            `Message discarded (likely a delayed response after account switch).`
-                    );
-                    return;
-                }
-                if (entry.requestAttemptId && parsedMessage.request_attempt_id !== entry.requestAttemptId) {
-                    this.logger.warn(
-                        `[Server] Received stale message for request ${requestId}: ` +
-                            `expected attempt=${entry.requestAttemptId}, got attempt=${parsedMessage.request_attempt_id || "missing"}. ` +
-                            `Message discarded (likely a delayed response from a previous retry).`
-                    );
-                    return;
-                }
-                this._routeMessage(parsedMessage, entry.queue);
-            } else {
-                this.logger.warn(`[Server] Received message for unknown or outdated request ID: ${requestId}`);
-            }
+            this.handleExternalMessage(parsedMessage, messageAuthIndex);
         } catch (error) {
             this.logger.error(`[Server] Failed to parse internal WebSocket message: ${error.message}`);
         }
+    }
+
+    /**
+     * Route a message that originates outside the browser WebSocket (e.g. the
+     * direct signer channel) into the queue registered for its request.
+     * Applies the same authIndex and attempt guards as browser messages.
+     * @param {object} parsedMessage - Message object with request_id / request_attempt_id / event_type
+     * @param {number} messageAuthIndex - The authIndex of the originating channel
+     * @returns {boolean} True when the message was routed into a queue
+     */
+    handleExternalMessage(parsedMessage, messageAuthIndex) {
+        const requestId = parsedMessage && parsedMessage.request_id;
+        if (!requestId) {
+            this.logger.warn("[Server] Received invalid message: missing request_id");
+            return false;
+        }
+        const entry = this.messageQueues.get(requestId);
+        if (!entry) {
+            this.logger.warn(`[Server] Received message for unknown or outdated request ID: ${requestId}`);
+            return false;
+        }
+        // Verify that the message comes from the correct authIndex
+        if (messageAuthIndex !== entry.authIndex) {
+            this.logger.warn(
+                `[Server] Received message for request ${requestId} from wrong account: ` +
+                    `expected authIndex=${entry.authIndex}, got authIndex=${messageAuthIndex}. ` +
+                    `Message discarded (likely a delayed response after account switch).`
+            );
+            return false;
+        }
+        if (entry.requestAttemptId && parsedMessage.request_attempt_id !== entry.requestAttemptId) {
+            this.logger.warn(
+                `[Server] Received stale message for request ${requestId}: ` +
+                    `expected attempt=${entry.requestAttemptId}, got attempt=${parsedMessage.request_attempt_id || "missing"}. ` +
+                    `Message discarded (likely a delayed response from a previous retry).`
+            );
+            return false;
+        }
+        this._routeMessage(parsedMessage, entry.queue);
+        return true;
     }
 
     _routeMessage(message, queue) {
