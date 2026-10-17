@@ -815,9 +815,59 @@
                                         <path d="m9 13 3 3 3-3" />
                                     </svg>
                                 </button>
+                                <button
+                                    v-if="hasSelection"
+                                    class="btn-batch-refresh"
+                                    :disabled="isBusy || state.accountsRefreshing"
+                                    :title="t('refreshSelectedAccounts')"
+                                    @click="refreshSelectedAccounts"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                                        <path d="M21 3v5h-5"></path>
+                                    </svg>
+                                </button>
+                                <span v-if="state.accountsRefreshing" class="selected-count">
+                                    {{
+                                        t("accountsRefreshing", {
+                                            current: state.accountsRefreshProgress.current,
+                                            total: state.accountsRefreshProgress.total,
+                                        })
+                                    }}
+                                </span>
                             </div>
-                            <!-- Right: Add, upload, and deduplicate -->
+                            <!-- Right: Refresh, add, upload, and deduplicate -->
                             <div class="icon-buttons">
+                                <button
+                                    :disabled="isBusy || state.accountsRefreshing || state.accountDetails.length === 0"
+                                    :title="t('refreshAllAccounts')"
+                                    @click="refreshAllAccounts"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                                        <path d="M21 3v5h-5"></path>
+                                    </svg>
+                                </button>
                                 <button :disabled="isBusy" :title="t('btnAddUser')" @click="addUser">
                                     <svg
                                         xmlns="http://www.w3.org/2000/svg"
@@ -908,6 +958,13 @@
                                             :class="{ 'is-error': item.isInvalid, 'is-duplicate': item.isDuplicate }"
                                         >
                                             {{ getAccountDisplayName(item) }}
+                                        </span>
+                                        <span
+                                            v-if="getTierLabel(item.tier)"
+                                            class="tier-badge"
+                                            :class="`tier-${item.tier}`"
+                                        >
+                                            {{ getTierLabel(item.tier) }}
                                         </span>
                                         <span v-if="item.index === state.currentAuthIndex" class="current-badge">
                                             {{ t("tagCurrent") }}
@@ -1001,6 +1058,26 @@
                                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                             <polyline points="7 10 12 15 17 10"></polyline>
                                             <line x1="12" y1="15" x2="12" y2="3"></line>
+                                        </svg>
+                                    </button>
+                                    <button
+                                        :disabled="isBusy || state.accountsRefreshing"
+                                        :title="t('refreshAccountInfo')"
+                                        @click.stop="refreshSingleAccount(item.index)"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            width="16"
+                                            height="16"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        >
+                                            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                                            <path d="M21 3v5h-5"></path>
                                         </svg>
                                     </button>
                                 </div>
@@ -3965,6 +4042,8 @@ const { theme, setTheme } = useTheme();
 
 const state = reactive({
     accountDetails: [],
+    accountsRefreshing: false,
+    accountsRefreshProgress: { current: 0, total: 0 },
     activeContextsCount: 0,
     apiKeySource: "",
     atgClientSyntheticGuardEnabled: true,
@@ -4249,6 +4328,60 @@ const batchDeleteAccounts = async () => {
 };
 
 // Batch download accounts as ZIP
+const refreshAccountChunk = async (indices, refreshEmail) => {
+    const res = await fetch("/api/accounts/refresh", {
+        body: JSON.stringify({ indices, refreshEmail }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(data.error || data.message || `HTTP ${res.status}`);
+    }
+    return data.results || [];
+};
+
+const runAccountRefresh = async (indices, refreshEmail) => {
+    if (state.accountsRefreshing) return;
+    const total = indices.length;
+    if (total === 0) return;
+    state.accountsRefreshing = true;
+    state.accountsRefreshProgress = { current: 0, total };
+    const results = [];
+    try {
+        const chunkSize = 5;
+        for (let start = 0; start < total; start += chunkSize) {
+            const chunk = indices.slice(start, start + chunkSize);
+            results.push(...(await refreshAccountChunk(chunk, refreshEmail)));
+            state.accountsRefreshProgress = { current: Math.min(start + chunk.length, total), total };
+        }
+        const valid = results.filter(item => item.valid === true).length;
+        const invalid = results.filter(item => item.valid === false).length;
+        const failed = results.filter(item => item.valid === null).length;
+        ElMessage.success(t("accountsRefreshResult", { failed, invalid, total, valid }));
+        updateContent();
+    } catch (err) {
+        ElMessage.error(t("accountsRefreshFailed", { error: err.message || err }));
+        updateContent();
+    } finally {
+        state.accountsRefreshing = false;
+        state.accountsRefreshProgress = { current: 0, total: 0 };
+    }
+};
+
+const refreshAllAccounts = () =>
+    runAccountRefresh(
+        state.accountDetails.map(item => item.index),
+        true
+    );
+
+const refreshSelectedAccounts = () => {
+    const indices = Array.from(state.selectedAccounts).sort((a, b) => a - b);
+    return runAccountRefresh(indices, true);
+};
+
+const refreshSingleAccount = index => runAccountRefresh([index], true);
+
 const batchDownloadAccounts = async () => {
     if (state.selectedAccounts.size === 0) {
         ElMessage.warning(t("noAccountSelected"));
@@ -4393,6 +4526,13 @@ const latestVersionFormatted = computed(() => {
 });
 
 // Get display name for account with i18n support
+const getTierLabel = tier => {
+    if (!tier) return "";
+    const key = `tier.${tier}`;
+    const label = t(key);
+    return label === key ? "" : label;
+};
+
 const getAccountDisplayName = account => {
     if (account.isInvalid) {
         return t("jsonFormatError");
@@ -5899,7 +6039,8 @@ watchEffect(() => {
     }
 }
 
-.btn-batch-download {
+.btn-batch-download,
+.btn-batch-refresh {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -6019,6 +6160,35 @@ watchEffect(() => {
     flex-shrink: 0;
     margin-left: 0;
     margin-right: 6px;
+}
+
+.tier-badge {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    background: transparent;
+    color: @text-secondary;
+    border: 1px solid @border-color;
+    border-radius: 12px;
+    flex-shrink: 0;
+    margin-right: 6px;
+}
+
+.tier-badge.tier-pro {
+    background: #409eff;
+    border-color: #409eff;
+    color: #ffffff;
+}
+
+.tier-badge.tier-ultra {
+    background: #8b5cf6;
+    border-color: #8b5cf6;
+    color: #ffffff;
+}
+
+.tier-badge.tier-plus {
+    background: #14b8a6;
+    border-color: #14b8a6;
+    color: #ffffff;
 }
 
 .account-actions {
