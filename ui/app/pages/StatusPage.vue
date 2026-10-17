@@ -1666,22 +1666,50 @@
                             </div>
                             <div class="switch-container">
                                 <span class="label">
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        width="14"
-                                        height="14"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        style="margin-right: 6px; vertical-align: middle"
-                                    >
-                                        <path d="M5 12h14"></path>
-                                        <path d="M12 5l7 7-7 7"></path>
-                                    </svg>
-                                    {{ t("atgMode") }}
+                                    <span>
+                                        {{ t("directSignerEnabled") }}
+                                        <EnvVarTooltip env-var="MAKERSUITE_DIRECT" doc-section="other-config" />
+                                    </span>
+                                </span>
+                                <el-switch
+                                    v-model="state.makerSuiteDirectEnabled"
+                                    :width="50"
+                                    :before-change="handleMakerSuiteDirectBeforeChange"
+                                />
+                            </div>
+                            <p style="margin: 0 0 4px; font-size: 12px; opacity: 0.75">
+                                {{ t("directSignerDesc") }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- ATG Card -->
+                    <div class="status-card">
+                        <h3 class="card-title">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                style="margin-right: 8px; vertical-align: text-bottom"
+                            >
+                                <path d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7l7-4z"></path>
+                                <path d="M9 12h6"></path>
+                            </svg>
+                            {{ t("atgSectionTitle") }}
+                        </h3>
+                        <div class="settings-switches">
+                            <div class="switch-container">
+                                <span class="label">
+                                    <span>
+                                        {{ t("atgMode") }}
+                                        <EnvVarTooltip env-var="ATG_MODE" doc-section="other-config" />
+                                    </span>
                                 </span>
                                 <el-select v-model="state.atgMode" style="width: 150px" @change="handleAtgModeChange">
                                     <el-option
@@ -1692,6 +1720,68 @@
                                     />
                                 </el-select>
                             </div>
+                            <div v-for="format in atgFormatKeys" :key="format" class="switch-container">
+                                <span class="label">
+                                    <span>
+                                        {{ t(`atgModeFormat.${format}`) }}
+                                        <EnvVarTooltip
+                                            :env-var="`ATG_MODE_${format.toUpperCase()}`"
+                                            doc-section="other-config"
+                                        />
+                                    </span>
+                                </span>
+                                <el-select
+                                    v-model="state.atgModeByFormat[format]"
+                                    style="width: 150px"
+                                    @change="val => handleAtgFormatModeChange(format, val)"
+                                >
+                                    <el-option
+                                        v-for="option in atgFormatModeOptions"
+                                        :key="option.value"
+                                        :label="t(option.label)"
+                                        :value="option.value"
+                                    />
+                                </el-select>
+                            </div>
+                            <div class="switch-container">
+                                <span class="label">
+                                    <span>
+                                        {{ t("atgClientSyntheticGuard") }}
+                                        <EnvVarTooltip
+                                            env-var="ATG_CLIENT_SYNTHETIC_GUARD"
+                                            doc-section="other-config"
+                                        />
+                                    </span>
+                                </span>
+                                <el-switch
+                                    v-model="state.atgClientSyntheticGuardEnabled"
+                                    :width="50"
+                                    :before-change="handleAtgGuardBeforeChange"
+                                />
+                            </div>
+                            <p style="margin: 0 0 4px; font-size: 12px; opacity: 0.75">
+                                {{ t("atgClientSyntheticGuardDesc") }}
+                            </p>
+                            <div class="switch-container">
+                                <span class="label">
+                                    <span>
+                                        {{ t("directSignerFallback") }}
+                                        <EnvVarTooltip
+                                            env-var="MAKERSUITE_DIRECT_FALLBACK"
+                                            doc-section="other-config"
+                                        />
+                                    </span>
+                                </span>
+                                <el-switch
+                                    v-model="state.makerSuiteDirectFallbackEnabled"
+                                    :width="50"
+                                    :disabled="!state.makerSuiteDirectEnabled"
+                                    :before-change="handleMakerSuiteFallbackBeforeChange"
+                                />
+                            </div>
+                            <p style="margin: 0 0 4px; font-size: 12px; opacity: 0.75">
+                                {{ t("directSignerFallbackDesc") }}
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -3832,7 +3922,9 @@ const state = reactive({
     accountDetails: [],
     activeContextsCount: 0,
     apiKeySource: "",
+    atgClientSyntheticGuardEnabled: true,
     atgMode: "off",
+    atgModeByFormat: { claude: "inherit", gemini: "inherit", openai: "inherit" },
     autoSwitchIntervalHours: 0,
     browserConnected: false,
     checkUpdateEnabled: true,
@@ -3858,6 +3950,9 @@ const state = reactive({
     logs: t("loading"),
 
     logScrollTop: 0,
+
+    makerSuiteDirectEnabled: false,
+    makerSuiteDirectFallbackEnabled: false,
 
     maxContexts: 1,
 
@@ -3893,6 +3988,13 @@ const safetySettingsThresholdOptions = [
 ];
 
 const atgModeOptions = [
+    { label: "atgMode.off", value: "off" },
+    { label: "atgMode.prefer", value: "prefer" },
+    { label: "atgMode.required", value: "required" },
+];
+const atgFormatKeys = ["gemini", "openai", "claude"];
+const atgFormatModeOptions = [
+    { label: "atgMode.inherit", value: "inherit" },
     { label: "atgMode.off", value: "off" },
     { label: "atgMode.prefer", value: "prefer" },
     { label: "atgMode.required", value: "required" },
@@ -4490,6 +4592,90 @@ const handleAtgModeChange = async val => {
     }
 };
 
+const handleAtgFormatModeChange = async (format, val) => {
+    if (!val) return;
+
+    try {
+        const res = await fetch("/api/settings/atg-mode-format", {
+            body: JSON.stringify({ format, mode: val }),
+            headers: { "Content-Type": "application/json" },
+            method: "PUT",
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+            ElMessage.success(
+                t(data.message, {
+                    setting: t(`atgModeFormat.${format}`),
+                    value: t(`atgMode.${val}`),
+                })
+            );
+        } else {
+            ElMessage.error(t(data.message || "settingFailed", { message: data.error || "" }));
+        }
+    } catch (err) {
+        ElMessage.error(t("settingFailed", { message: err.message || err }));
+    } finally {
+        updateContent();
+    }
+};
+
+const putBooleanSetting = async (path, value, labelKey) => {
+    try {
+        const res = await fetch(path, {
+            body: JSON.stringify({ value }),
+            headers: { "Content-Type": "application/json" },
+            method: "PUT",
+        });
+        const data = await res.json();
+        if (res.ok) {
+            ElMessage.success(t(data.message, { setting: t(labelKey), value: String(data.value) }));
+            return data.value === true;
+        }
+        ElMessage.error(t(data.message || "settingFailed", { message: data.error || "" }));
+        return null;
+    } catch (err) {
+        ElMessage.error(t("settingFailed", { message: err.message || err }));
+        return null;
+    }
+};
+
+const handleAtgGuardBeforeChange = async () => {
+    const applied = await putBooleanSetting(
+        "/api/settings/atg-client-guard",
+        !state.atgClientSyntheticGuardEnabled,
+        "atgClientSyntheticGuard"
+    );
+    updateContent();
+    return applied === null ? false : applied;
+};
+
+const handleMakerSuiteDirectBeforeChange = async () => {
+    const applied = await putBooleanSetting(
+        "/api/settings/maker-suite-direct",
+        !state.makerSuiteDirectEnabled,
+        "directSignerEnabled"
+    );
+    if (applied !== null && !applied) {
+        state.makerSuiteDirectFallbackEnabled = false;
+    }
+    updateContent();
+    return applied === null ? false : applied;
+};
+
+const handleMakerSuiteFallbackBeforeChange = async () => {
+    if (!state.makerSuiteDirectEnabled) {
+        return false;
+    }
+    const applied = await putBooleanSetting(
+        "/api/settings/maker-suite-direct-fallback",
+        !state.makerSuiteDirectFallbackEnabled,
+        "directSignerFallback"
+    );
+    updateContent();
+    return applied === null ? false : applied;
+};
+
 const handleLanguageChange = lang => {
     I18n.setLang(lang);
     state.currentLang = lang;
@@ -4680,6 +4866,15 @@ const updateStatus = data => {
     state.maxRetries = data.status.maxRetries ?? 3;
     state.safetySettingsThreshold = data.status.safetySettingsThreshold || "OFF";
     state.atgMode = data.status.atgMode || "off";
+    state.atgModeByFormat = {
+        claude: (data.status.atgModeByFormat && data.status.atgModeByFormat.claude) || "inherit",
+        gemini: (data.status.atgModeByFormat && data.status.atgModeByFormat.gemini) || "inherit",
+        openai: (data.status.atgModeByFormat && data.status.atgModeByFormat.openai) || "inherit",
+    };
+    state.atgClientSyntheticGuardEnabled = data.status.atgClientSyntheticGuard !== false;
+    state.makerSuiteDirectEnabled = data.status.makerSuiteDirect === true;
+    state.makerSuiteDirectFallbackEnabled =
+        state.makerSuiteDirectEnabled && data.status.makerSuiteDirectFallback === true;
     state.startupKeepaliveEnabled = isEnabled(data.status.startupKeepaliveEnabled);
     state.startupKeepaliveProgress = data.status.startupKeepaliveProgress || { current: 0, total: 0 };
     state.startupKeepaliveState = data.status.startupKeepaliveState || "inactive";
