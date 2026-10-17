@@ -22,6 +22,7 @@
  */
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { randomUUID } = require("crypto");
 
@@ -146,6 +147,39 @@ function installDirectSigner(codecFactory, options, scanArrayElements) {
         }
     };
 
+    // Bounded diagnostics channel: reports signing inputs/outputs and egress
+    // samples back to the server log for token-form alignment (see NetWatch).
+    let noteLeft = 30;
+    const note = (tag, value) => {
+        if (noteLeft <= 0) return;
+        noteLeft -= 1;
+        try {
+            send({ note: String(value).slice(0, 600), tag, type: "signer_note" });
+        } catch {
+            /* best effort */
+        }
+    };
+    function describeSig(value) {
+        try {
+            if (typeof value === "string") return `str(${value.length}):${value.slice(0, 160)}`;
+            if (value && typeof value.length === "number") {
+                let text = "";
+                try {
+                    text = new TextDecoder().decode(value);
+                } catch {
+                    text = "";
+                }
+                const printable = text && !text.includes("\uFFFD") && /^[\x20-\x7E\u4e00-\u9FFF\s]*$/.test(text);
+                if (printable) return `bytes(${value.length})~text:${text.slice(0, 200)}`;
+                const head = Array.from(value.slice(0, 24), b => Number(b) & 255).join(",");
+                return `bytes(${value.length}):hexhead:${head}`;
+            }
+            return `${typeof value}`;
+        } catch {
+            return "?";
+        }
+    }
+
     const service = {
         acquire() {
             if (service.tb) return true;
@@ -200,10 +234,34 @@ function installDirectSigner(codecFactory, options, scanArrayElements) {
                         }
                         notify();
                     }
-                    return original.apply(this, arguments);
+                    const res = original.apply(this, arguments);
+                    try {
+                        Promise.resolve(res)
+                            .then(v => note("Cn", `in1=${describeSig(arguments[1])} out=${describeSig(v)}`))
+                            .catch(() => {});
+                    } catch {
+                        /* best effort */
+                    }
+                    return res;
                 };
                 wrapped.__directSignerHook = true;
                 M.Cn = wrapped;
+            }
+            if (M.GB && !M.GB.__directSignerHook) {
+                const originalGB = M.GB;
+                const wrappedGB = function () {
+                    const res = originalGB.apply(this, arguments);
+                    try {
+                        Promise.resolve(res)
+                            .then(v => note("GB", `in0=${describeSig(arguments[0])} out=${describeSig(v)}`))
+                            .catch(() => {});
+                    } catch {
+                        /* best effort */
+                    }
+                    return res;
+                };
+                wrappedGB.__directSignerHook = true;
+                M.GB = wrappedGB;
             }
             return service.tb ? "ready" : "token_pending";
         },
@@ -313,7 +371,7 @@ function installDirectSigner(codecFactory, options, scanArrayElements) {
         const cancelled = () => finish({ error: "[DirectSigner] cancelled", id, status: 502, type: "signer_error" });
 
         try {
-            if (!service.codec || !service.codec.buildBody) {
+            if (!service.codec || !service.codec.buildHashText) {
                 return finish({
                     error: `[DirectSigner] codec unavailable: ${service.codecError || "unknown"}`,
                     id,
@@ -321,13 +379,12 @@ function installDirectSigner(codecFactory, options, scanArrayElements) {
                     type: "signer_error",
                 });
             }
-            let body, ht;
+            let g;
             try {
-                const g = JSON.parse(task.body || "{}");
-                ({ body, ht } = service.codec.buildBody(task.model, g));
+                g = JSON.parse(task.body || "{}");
             } catch (e) {
                 return finish({
-                    error: `[DirectSigner] codec rejected this request: ${String((e && e.message) || "invalid request")}`,
+                    error: `[DirectSigner] invalid request JSON: ${String((e && e.message) || "invalid request")}`,
                     id,
                     status: 400,
                     type: "signer_error",
@@ -368,8 +425,11 @@ function installDirectSigner(codecFactory, options, scanArrayElements) {
                         headers[name] = service.rpcHeaders[name];
                 }
             }
-            body[4] = await M.Cn(tb, await M.GB(ht));
-            if (!body[4]) {
+            // Host scheme (observed on warm-up egress): M.Cn(tb, M.GB(path + " " + bodyJson)).
+            const pathElement = `/v1beta/models/${task.model}:streamGenerateContent`;
+            const jsonText = typeof task.body === "string" && task.body ? task.body : JSON.stringify(g);
+            const token = await M.Cn(tb, await M.GB(`${pathElement} ${jsonText}`));
+            if (!token) {
                 return finish({
                     error: "[DirectSigner] token empty",
                     id,
@@ -379,10 +439,15 @@ function installDirectSigner(codecFactory, options, scanArrayElements) {
             }
             if (controller.signal.aborted) return cancelled();
 
+            // ProxyStreamedCall carries the raw Gemini JSON verbatim (the same shape
+            // the native host sends): [path, JSON string, signed token]. No positional
+            // compilation involved, so every request form (ANY tool choice, etc.)
+            // rides the direct channel as-is.
+            const payload = [pathElement, jsonText, token];
             const upstream = await nativeFetch(
-                mb.F + "/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/GenerateContent",
+                mb.F + "/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/ProxyStreamedCall",
                 {
-                    body: JSON.stringify(body),
+                    body: JSON.stringify(payload),
                     credentials: "include",
                     headers,
                     method: "POST",
@@ -441,17 +506,40 @@ function installDirectSigner(codecFactory, options, scanArrayElements) {
                 frames = 0,
                 droppedElements = 0;
             const droppedSamples = [];
+            const emitValue = value => {
+                send({ data: `data: ${JSON.stringify(value)}\n\n`, id, type: "signer_frame" });
+                frames++;
+                safeLog(`[DirectSigner] frame#${frames} at +${Date.now() - taskT0}ms`);
+            };
             const emitChunk = parsed => {
+                let value = parsed;
+                if (typeof value === "string") {
+                    try {
+                        value = JSON.parse(value);
+                    } catch {
+                        return false;
+                    }
+                }
+                if (Array.isArray(value) && value.length === 1 && typeof value[0] === "string") {
+                    try {
+                        value = JSON.parse(value[0]);
+                    } catch {
+                        return false;
+                    }
+                }
+                if (value && typeof value === "object" && (value.candidates || value.usageMetadata)) {
+                    emitValue(value);
+                    return true;
+                }
+                if (!Array.isArray(value)) return false;
                 let chunk = null;
                 try {
-                    chunk = service.codec.convChunk(parsed);
+                    chunk = service.codec.convChunk(value);
                 } catch {
                     chunk = null;
                 }
                 if (chunk && (chunk.candidates || chunk.usageMetadata)) {
-                    send({ data: `data: ${JSON.stringify(chunk)}\n\n`, id, type: "signer_frame" });
-                    frames++;
-                    safeLog(`[DirectSigner] frame#${frames} at +${Date.now() - taskT0}ms`);
+                    emitValue(chunk);
                     return true;
                 }
                 return false;
@@ -522,8 +610,9 @@ function installDirectSigner(codecFactory, options, scanArrayElements) {
             // envelope are converted individually, and a raw sample is attached for
             // diagnosis when nothing converts.
             if (frames === 0) {
-                const sample = buffer.slice(0, 700);
+                const sample = buffer.slice(0, 12000);
                 let recovered = 0;
+                let wrapError = null;
                 try {
                     const normalized = service.codec.wrapResponse(buffer, true);
                     const wrapped = JSON.parse(normalized);
@@ -544,25 +633,82 @@ function installDirectSigner(codecFactory, options, scanArrayElements) {
                         }
                     }
                 } catch (e) {
-                    const rpcMessage =
-                        Array.isArray(e.rpcStatus) && typeof e.rpcStatus[1] === "string" ? e.rpcStatus[1] : "";
-                    return finish({
-                        error: `[DirectSigner] stream error: ${(rpcMessage || String((e && e.message) || e)).slice(
-                            0,
-                            300
-                        )}`,
-                        id,
-                        sample,
-                        status: e.status || 502,
-                        type: "signer_error",
-                    });
+                    wrapError = e;
                 }
                 if (recovered === 0) {
+                    // ProxyStreamedCall holder form: [[["chunk"],["chunk"],...]] - direct
+                    // parse and pull the single-string holders.
+                    try {
+                        const wrappedDirect = JSON.parse(buffer);
+                        const list =
+                            Array.isArray(wrappedDirect) && Array.isArray(wrappedDirect[0]) ? wrappedDirect[0] : [];
+                        for (const entry of list) {
+                            try {
+                                const parsed =
+                                    typeof entry === "string"
+                                        ? JSON.parse(entry)
+                                        : Array.isArray(entry) && entry.length === 1 && typeof entry[0] === "string"
+                                          ? JSON.parse(entry[0])
+                                          : entry;
+                                if (parsed && (parsed.candidates || parsed.usageMetadata)) {
+                                    send({ data: `data: ${JSON.stringify(parsed)}\n\n`, id, type: "signer_frame" });
+                                    recovered++;
+                                }
+                            } catch {
+                                /* skip malformed entry */
+                            }
+                        }
+                    } catch {
+                        /* fall through to the walker */
+                    }
+                }
+                if (recovered === 0) {
+                    // ProxyStreamedCall form: nested arrays whose leaves are escaped JSON
+                    // strings carrying Gemini REST chunks. Walk the whole body and
+                    // double-parse every string leaf; emit whatever looks like a chunk.
+                    try {
+                        const walk = node => {
+                            if (typeof node === "string") {
+                                let inner = null;
+                                try {
+                                    inner = JSON.parse(node);
+                                } catch {
+                                    return;
+                                }
+                                if (inner && (inner.candidates || inner.usageMetadata)) {
+                                    send({ data: `data: ${JSON.stringify(inner)}\n\n`, id, type: "signer_frame" });
+                                    recovered++;
+                                } else {
+                                    walk(inner);
+                                }
+                            } else if (Array.isArray(node)) {
+                                for (const child of node) walk(child);
+                            } else if (node && typeof node === "object" && (node.candidates || node.usageMetadata)) {
+                                send({ data: `data: ${JSON.stringify(node)}\n\n`, id, type: "signer_frame" });
+                                recovered++;
+                            }
+                        };
+                        walk(JSON.parse(buffer));
+                    } catch {
+                        /* keep the sample-based failure below */
+                    }
+                }
+                if (recovered === 0) {
+                    let errorText = "[DirectSigner] upstream response produced no convertible chunks";
+                    if (wrapError) {
+                        const rpcMessage =
+                            Array.isArray(wrapError.rpcStatus) && typeof wrapError.rpcStatus[1] === "string"
+                                ? wrapError.rpcStatus[1]
+                                : "";
+                        errorText = `[DirectSigner] stream error: ${(
+                            rpcMessage || String((wrapError && wrapError.message) || wrapError)
+                        ).slice(0, 300)}`;
+                    }
                     return finish({
-                        error: "[DirectSigner] upstream response produced no convertible chunks",
+                        error: errorText,
                         id,
                         sample,
-                        status: 502,
+                        status: (wrapError && wrapError.status) || 502,
                         type: "signer_error",
                     });
                 }
@@ -702,6 +848,7 @@ function installDirectSigner(codecFactory, options, scanArrayElements) {
                     service.warmup = "swallowed";
                     notify(true);
                     safeLog("[DirectSigner] warmup request swallowed (credentials captured)");
+                    note("egress", rawBody.slice(0, 900));
                     return swallow(this, entry);
                 }
             }
@@ -921,10 +1068,10 @@ class DirectSignerService {
         const match = String(proxyRequest.path || "").match(/\/v1beta\/models\/([^:/?]+):streamGenerateContent/);
         if (!match) return false;
 
-        // Optional forced-tool auto-fallback (UI switch, only meaningful while the
-        // channel is ON; default OFF). When enabled, requests whose toolConfig the
-        // direct codec cannot encode are delegated to the native path instead of
-        // failing with an explicit error.
+        // Optional forced-tool auto-route (UI switch, only meaningful while the
+        // channel is ON; default OFF). When enabled, requests that force a tool
+        // choice are delegated to the native path; with it off they ride the
+        // direct channel (ProxyStreamedCall carries them verbatim).
         if (this.config && this.config.makerSuiteDirectFallback === true) {
             const bodyText = typeof proxyRequest.body === "string" ? proxyRequest.body : "";
             if (bodyText && /"tool_?[Cc]onfig"|"allowedFunctionNames"/.test(bodyText)) {
@@ -938,9 +1085,9 @@ class DirectSignerService {
                             Array.isArray(functionCallingConfig.allowedFunctionNames))
                     ) {
                         this.logger.debug(
-                            `[DirectSigner] request=${requestId}: auto-fallback ON — delegating to native path (toolConfig mode=${
+                            `[DirectSigner] request=${requestId}: forced-tool auto-route ON — delegating to native path (toolConfig mode=${
                                 functionCallingConfig.mode || "AUTO"
-                            } not encodable by the direct codec)`
+                            })`
                         );
                         return false;
                     }
@@ -1135,6 +1282,16 @@ class DirectSignerService {
                     status: Number(message.status) || 502,
                 });
                 if (task) {
+                    if (message.sample && String(message.sample).length > 300) {
+                        try {
+                            fs.writeFileSync(
+                                path.join(os.tmpdir(), "direct-signer-sample.txt"),
+                                String(message.sample)
+                            );
+                        } catch {
+                            /* diagnostics only */
+                        }
+                    }
                     const detail = message.sample ? ` sample=${String(message.sample).replace(/\s+/g, " ")}` : "";
                     this.logger.warn(
                         `[DirectSigner] task error request=${task.requestId} status=${message.status}: ${
@@ -1145,6 +1302,9 @@ class DirectSignerService {
                 this._finishTask(message.id, "error");
                 break;
             }
+            case "signer_note":
+                this.logger.debug(`[DirectSigner] note ${message.tag || ""}: ${String(message.note || "")}`);
+                break;
             default:
                 this.logger.debug(`[DirectSigner] unknown signer message type: ${message.type}`);
         }

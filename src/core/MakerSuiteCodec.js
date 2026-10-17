@@ -260,6 +260,19 @@ function buildBody(model, g) {
         .join(" ");
     return { body, ht };
 }
+// Same text digest the compiled flow feeds to M.GB/M.Cn; computed straight from
+// the raw Gemini JSON so the ProxyStreamedCall transport needs no compilation.
+function buildHashText(g) {
+    return (Array.isArray(g && g.contents) ? g.contents : [])
+        .flatMap(c => (c && Array.isArray(c.parts) ? c.parts : []))
+        .map(p => {
+            if (p && typeof p.text === "string") return p.text;
+            const inline = p && (p.inlineData || p.inline_data);
+            return inline && typeof inline.data === "string" ? inline.data : "";
+        })
+        .filter(Boolean)
+        .join(" ");
+}
 function convChunk(m) {
     const out = {};
     if (Array.isArray(m[0]))
@@ -387,4 +400,4 @@ function errorEnvelope(text, status) {
         status: status >= 400 ? status : 502,
     };
 }
-module.exports = { buildBody, convChunk, decStruct, encStruct, errorEnvelope, merge, wrapResponse };
+module.exports = { buildBody, buildHashText, convChunk, decStruct, encStruct, errorEnvelope, merge, wrapResponse };
