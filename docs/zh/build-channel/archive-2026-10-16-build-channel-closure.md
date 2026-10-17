@@ -87,3 +87,11 @@
 
 - `D:\LLM\self_programming\aistudio-api` —— AI Studio Web 反代（FastAPI + CloakBrowser CDP + BotGuard 页内签名 + 多账号调度）；入门看其 `README.md` 与 `docs/{ARCHITECTURE,BOTGUARD_VERIFICATION_CHAIN,WIRE_SPECIFICATION}.md`。
 - `D:\LLM\self_programming\GeminiLocalAPI\GeminiLocalAPI-source` —— gemini-webapi（Gemini 消费者端异步库 + CLI + desktop）。
+
+---
+
+## 八、更正与状态变更（2026-10-17）
+
+1. **因果表述更正（§2.2/§2.3）**：旧代理通道并非"宿主本地合成 400、未出网"。实测旧 RPC 为**真实网络请求**——抓取到完整请求头（`host=alkalimakersuite-pa.clients6.google.com`、`x-goog-api-key` 39 字符 AIza key、`authorization` 195 字符、cookie）。400 INVALID_ARGUMENT 系**上游拒绝该旧 RPC 通道的生成 POST 后透传**（与 yunx738/ais2api 修复结论一致）；此前"零网络事件"推断系观测范围所限。
+2. **状态变更**：经用户指示，本方向**解除封档并已复活**——采用代理层桥接（拦截旧 RPC → 页面内直调 `MakerSuiteService/GenerateContent` → 旧信封回填；App 零改动），2026-10-17 真机验证 HTTP 200（非流式×5 + 流式 + ATG 回环）。实现与验收记录见 `docs/zh/build-channel/makersuite-generate-content-bridge-20261016.md`，分支 `fix/makersuite-generatecontent-bridge`。
+3. §一.1 修订：全社区同时中招属实；"客户端侧无解"不成立——代理层桥接即为客户端侧解法，已实证。
