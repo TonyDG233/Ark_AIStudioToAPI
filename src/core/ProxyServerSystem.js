@@ -17,6 +17,7 @@ const { URL } = require("url");
 
 const LoggingService = require("../utils/LoggingService");
 const AuthSource = require("../auth/AuthSource");
+const AccountInfoRefresher = require("./AccountInfoRefresher");
 const BrowserManager = require("./BrowserManager");
 const ConnectionRegistry = require("./ConnectionRegistry");
 const DirectSignerService = require("./DirectSignerService");
@@ -45,6 +46,9 @@ class ProxyServerSystem extends EventEmitter {
             path.join(process.cwd(), "data"),
             this.config.enableUsageStats
         );
+
+        // Node-only account info refresh (credential validity / benefit tier / email backfill)
+        this.accountInfoRefresher = new AccountInfoRefresher(this.logger, this.config, this.authSource);
 
         // Create ConnectionRegistry with lightweight reconnect callback
         // When WebSocket connection is lost but browser is still running,

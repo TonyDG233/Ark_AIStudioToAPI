@@ -26,6 +26,9 @@ class AuthSource {
         this.expiredIndices = [];
         this.initialIndices = [];
         this.accountNameMap = new Map();
+        // Benefit tier metadata (read from auth files, filled by the account info refresh)
+        this.accountTierMap = new Map();
+        this.accountTierCheckedAtMap = new Map();
         // Map any valid index -> canonical (latest) index for the same account email
         this.canonicalIndexMap = new Map();
         // Duplicate groups (email -> kept + duplicates)
@@ -112,6 +115,8 @@ class AuthSource {
             this.duplicateIndices = [];
             this.expiredIndices = [];
             this.accountNameMap.clear();
+            this.accountTierMap.clear();
+            this.accountTierCheckedAtMap.clear();
             this.canonicalIndexMap.clear();
             this.duplicateGroups = [];
             return;
@@ -120,6 +125,8 @@ class AuthSource {
         const validIndices = [];
         const invalidSourceDescriptions = [];
         this.accountNameMap.clear(); // Clear old names before re-validating
+        this.accountTierMap.clear();
+        this.accountTierCheckedAtMap.clear();
         this.canonicalIndexMap.clear();
         this.duplicateGroups = [];
         this.expiredIndices = [];
@@ -132,6 +139,8 @@ class AuthSource {
                     const authData = JSON.parse(authContent);
                     validIndices.push(index);
                     this.accountNameMap.set(index, authData.accountName || null);
+                    this.accountTierMap.set(index, authData.benefitTier || null);
+                    this.accountTierCheckedAtMap.set(index, authData.tierCheckedAt || null);
                     // Track expired status from auth file
                     if (authData.expired === true) {
                         this.expiredIndices.push(index);
@@ -277,6 +286,54 @@ class AuthSource {
 
     getDuplicateGroups() {
         return this.duplicateGroups;
+    }
+
+    /**
+     * Merge metadata fields into an auth file (and in-memory maps).
+     *
+     * Used by the account info refresh to persist the benefit tier / checked-at
+     * timestamp and to backfill the account email. Fields already present in the
+     * file are preserved (only the patched keys are replaced).
+     *
+     * @param {number} index - Auth index
+     * @param {object} patch - Fields to merge (e.g. { accountName, benefitTier, tierCheckedAt })
+     * @returns {Promise<boolean>} True when the file was updated
+     */
+    async updateAccountMetadata(index, patch) {
+        if (!this.availableIndices.includes(index)) {
+            this.logger.warn(`[Auth] Cannot update metadata for non-existent auth #${index}`);
+            return false;
+        }
+        if (!patch || typeof patch !== "object" || Object.keys(patch).length === 0) {
+            return false;
+        }
+
+        const authFilePath = path.join(process.cwd(), "configs", "auth", `auth-${index}.json`);
+        try {
+            const fileContent = await fsPromises.readFile(authFilePath, "utf-8");
+            const authData = JSON.parse(fileContent);
+            Object.assign(authData, patch);
+            await fsPromises.writeFile(authFilePath, JSON.stringify(authData, null, 2));
+
+            if (Object.prototype.hasOwnProperty.call(patch, "accountName")) {
+                const name = patch.accountName || null;
+                if (this.accountNameMap.get(index) !== name) {
+                    this.accountNameMap.set(index, name);
+                    // Email changes affect duplicate detection / rotation membership.
+                    this._buildRotationIndices();
+                }
+            }
+            if (Object.prototype.hasOwnProperty.call(patch, "benefitTier")) {
+                this.accountTierMap.set(index, patch.benefitTier || null);
+            }
+            if (Object.prototype.hasOwnProperty.call(patch, "tierCheckedAt")) {
+                this.accountTierCheckedAtMap.set(index, patch.tierCheckedAt || null);
+            }
+            return true;
+        } catch (error) {
+            this.logger.error(`[Auth] Failed to update metadata for auth #${index}: ${error.message}`);
+            return false;
+        }
     }
 
     /**
