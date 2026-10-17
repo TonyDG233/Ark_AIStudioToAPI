@@ -7,6 +7,7 @@
 const { createModelFilter } = require("./modelFilter");
 
 const DEFAULTS = {
+    clientSyntheticGuard: true,
     controlPosition: "tail",
     emptyRetries: 2,
     maxResponseBytes: 16 * 1024 * 1024,
@@ -42,6 +43,7 @@ function parseBoundedInt(value, fallback, min, max) {
 
 function loadAtgConfig(overrides = {}) {
     const env = {
+        clientSyntheticGuard: String(readEnv("ATG_CLIENT_SYNTHETIC_GUARD") || "").toLowerCase() !== "off",
         controlPosition: readEnv("ATG_CONTROL_POSITION") === "head" ? "head" : "tail",
         emptyRetries: parseBoundedInt(readEnv("ATG_EMPTY_RETRIES"), DEFAULTS.emptyRetries, 0, 5),
         maxResponseBytes: parseBoundedInt(

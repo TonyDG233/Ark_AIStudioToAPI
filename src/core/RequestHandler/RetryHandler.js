@@ -45,6 +45,7 @@ class RetryHandler extends ConnectionHandler {
         const atgWrap = this._applyAtgWrap(googleBody, res.__proxyApiFormat || "generation", model);
         googleBody = atgWrap.body;
         res.__atgToolName = atgWrap.toolName || "";
+        res.__atgMode = atgWrap.mode || "";
 
         const proxyRequest = {
             body: JSON.stringify(googleBody),

@@ -815,6 +815,54 @@ class StatusRoutes {
             });
         });
 
+        app.put("/api/settings/atg-mode-format", isAuthenticated, (req, res) => {
+            const format = String(req.body?.format || "")
+                .trim()
+                .toLowerCase();
+            const mode = String(req.body?.mode || "")
+                .trim()
+                .toLowerCase();
+            if (
+                !["gemini", "openai", "claude"].includes(format) ||
+                !["inherit", "off", "prefer", "required"].includes(mode)
+            ) {
+                return res.status(400).json({ error: "Invalid ATG format mode", message: "settingFailed" });
+            }
+
+            const effectiveMode = this.serverSystem.requestHandler.setAtgModeForFormat(format, mode);
+            this.logger.info(`[WebUI] ATG mode for ${format} switched to: ${effectiveMode}`);
+
+            return res.status(200).json({
+                message: "settingUpdateSuccess",
+                setting: `atgMode.${format}`,
+                value: effectiveMode,
+            });
+        });
+
+        app.put("/api/settings/atg-client-guard", isAuthenticated, (req, res) => {
+            const enabled = req.body?.value === true;
+            const effective = this.serverSystem.requestHandler.setAtgClientSyntheticGuard(enabled);
+            this.logger.info(`[WebUI] ATG client synthetic guard switched to: ${effective}`);
+
+            return res.status(200).json({
+                message: "settingUpdateSuccess",
+                setting: "atgClientSyntheticGuard",
+                value: effective,
+            });
+        });
+
+        app.put("/api/settings/maker-suite-direct", isAuthenticated, async (req, res) => {
+            const enabled = req.body?.value === true;
+            await this.serverSystem.directSignerService.setEnabled(enabled);
+            this.logger.info(`[WebUI] Direct signer channel switched to: ${enabled ? "on" : "off"}`);
+
+            return res.status(200).json({
+                message: "settingUpdateSuccess",
+                setting: "makerSuiteDirect",
+                value: enabled,
+            });
+        });
+
         app.put("/api/settings/debug-mode", isAuthenticated, (req, res) => {
             const currentLevel = LoggingService.getLevel();
             const newLevel = currentLevel === "DEBUG" ? "INFO" : "DEBUG";
@@ -1046,7 +1094,9 @@ class StatusRoutes {
                 accountDetails,
                 activeContextsCount: browserManager.contexts.size,
                 apiKeySource: config.apiKeySource,
+                atgClientSyntheticGuard: requestHandler.atgClientSyntheticGuard === true,
                 atgMode: requestHandler.atgMode || "off",
+                atgModeByFormat: requestHandler.atgModeByFormat || {},
                 autoSwitchIntervalHours: this.config.autoSwitchIntervalHours,
                 browserConnected: !!this.serverSystem.connectionRegistry.getConnectionByAuth(currentAuthIndex, false),
                 checkUpdate: config.checkUpdate,
@@ -1070,6 +1120,7 @@ class StatusRoutes {
                 invalidIndicesRaw: invalidIndices,
                 isSystemBusy: requestHandler.isSystemBusy,
                 logMaxCount: limit,
+                makerSuiteDirect: this.serverSystem.directSignerService?.enabled === true,
                 maxContexts: config.maxContexts,
                 maxRetries: config.maxRetries,
                 nextSwitchTimestamp: this.serverSystem.nextSwitchTimestamp || -1,

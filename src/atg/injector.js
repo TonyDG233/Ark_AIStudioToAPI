@@ -7,6 +7,7 @@
  * always injected as a "user" turn — which doubles as the "end with user turn" (Gemini 400) fix.
  */
 const crypto = require("crypto");
+const { detectClientSyntheticTransport } = require("./clientPatterns");
 const { createModelFilter } = require("./modelFilter");
 
 const DEFAULT_CONTROL_TEMPLATE =
@@ -92,6 +93,22 @@ function createInjector(cfg) {
                 return { body, syntheticHit: false, toolName: "" };
             }
 
+            // Client-side synthetic transport guard: when the client already ships a
+            // similar answer-via-tool-call mechanism (Tavern anti-truncation tooling
+            // and the like), skip the local wrap for this request so two synthetic
+            // transports never stack. Declared client tools are always surfaced so
+            // unrecognized mechanisms can be identified from logs.
+            let clientTools = [];
+            if (cfg.clientSyntheticGuard !== false) {
+                const detected = detectClientSyntheticTransport(body, prefix);
+                if (detected) {
+                    if (detected.hit) {
+                        return { body, clientSynthetic: detected, syntheticHit: false, toolName: "" };
+                    }
+                    clientTools = detected.tools || [];
+                }
+            }
+
             const existingNames = collectExistingNames(body);
             const toolName = generateToolName(prefix, existingNames);
 
@@ -153,7 +170,7 @@ function createInjector(cfg) {
                 body.contents = [...contents, controlContent];
             }
 
-            return { body, syntheticHit: true, toolName };
+            return { body, clientTools, syntheticHit: true, toolName };
         },
     };
 }
