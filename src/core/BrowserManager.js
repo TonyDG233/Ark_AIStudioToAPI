@@ -2089,6 +2089,44 @@ class BrowserManager {
             const privacyScript = this._getPrivacyProtectionScript(authIndex);
             await context.addInitScript(privacyScript);
 
+            // Egress watcher (capture instrumentation): records generation RPC traffic -
+            // the Proxy*Call family or any body carrying request markers - with frame
+            // provenance and a truncated request body. Debug level: bounded, opt-in via
+            // LOG_LEVEL=DEBUG; used for codec/transport sampling against ground truth.
+            context.on("request", request => {
+                try {
+                    const url = request.url();
+                    let post = null;
+                    try {
+                        post = request.postData();
+                    } catch {
+                        post = null;
+                    }
+                    const hit =
+                        /MakerSuiteService\/(Proxy(Unary|Streamed)Call|GenerateContent)/i.test(url) ||
+                        (post &&
+                            /streamGenerateContent|toolConfig|allowedFunctionNames/.test(String(post).slice(0, 20000)));
+                    if (!hit) return;
+                    let frameUrl = "";
+                    try {
+                        const frame = request.frame();
+                        frameUrl = frame ? String(frame.url()).slice(0, 140) : "";
+                    } catch {
+                        frameUrl = "";
+                    }
+                    this.logger.debug(
+                        `[NetWatch] a#${authIndex} ${request.method()} ${
+                            request.resourceType ? request.resourceType() : "?"
+                        } ${url.slice(0, 200)} frame=${frameUrl}`
+                    );
+                    if (post) {
+                        this.logger.debug(`[NetWatch] body(${String(post).length}): ${String(post).slice(0, 6000)}`);
+                    }
+                } catch {
+                    /* watch is best effort */
+                }
+            });
+
             page = await context.newPage();
 
             // Direct signer pipeline (MAKERSUITE_DIRECT=on): install the page script
