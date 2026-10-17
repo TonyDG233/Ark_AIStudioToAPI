@@ -295,6 +295,31 @@ class StatusRoutes {
             }
         });
 
+        app.post("/api/accounts/refresh", isAuthenticated, async (req, res) => {
+            const refresher = this.serverSystem.accountInfoRefresher;
+            if (!refresher) {
+                return res.status(500).json({ error: "Account refresher unavailable", message: "settingFailed" });
+            }
+            const indices = Array.isArray(req.body?.indices)
+                ? req.body.indices.filter(value => Number.isInteger(value) && value >= 0)
+                : [];
+            if (indices.length === 0) {
+                return res.status(400).json({ error: "No valid account indices provided", message: "settingFailed" });
+            }
+            if (refresher.isRefreshing()) {
+                return res.status(409).json({ error: "Account refresh is already running", message: "settingFailed" });
+            }
+            try {
+                const results = await refresher.refreshAccounts(indices, {
+                    refreshEmail: req.body?.refreshEmail === true,
+                });
+                return res.status(200).json({ message: "accountsRefreshDone", results });
+            } catch (error) {
+                this.logger.error(`[WebUI] Account info refresh failed: ${error.message}`);
+                return res.status(500).json({ error: error.message, message: "settingFailed" });
+            }
+        });
+
         app.post("/api/accounts/deduplicate", isAuthenticated, async (req, res) => {
             try {
                 if (this._rejectIfSystemBusy(res)) return;
@@ -779,6 +804,29 @@ class StatusRoutes {
             res.status(200).json({ message: "settingUpdateSuccess", setting: "enableAuthUpdate", value: statusText });
         });
 
+        app.put("/api/settings/enable-auto-switch", isAuthenticated, (req, res) => {
+            this.config.enableAutoSwitch = !this.config.enableAutoSwitch;
+            const statusText = this.config.enableAutoSwitch;
+            this.logger.info(`[WebUI] Enable auto switch toggle switched to: ${statusText}`);
+            this.serverSystem.updateAutoSwitchTimer();
+            res.status(200).json({ message: "settingUpdateSuccess", setting: "enableAutoSwitch", value: statusText });
+        });
+
+        app.put("/api/settings/auto-switch-interval", isAuthenticated, (req, res) => {
+            const hours = parseFloat(req.body?.hours);
+            if (!Number.isFinite(hours) || hours < 0.1 || hours > 168) {
+                return res.status(400).json({ error: "Invalid auto switch interval", message: "settingFailed" });
+            }
+            this.config.autoSwitchIntervalHours = hours;
+            this.logger.info(`[WebUI] Auto switch interval updated to: ${hours} hours`);
+            this.serverSystem.updateAutoSwitchTimer();
+            return res.status(200).json({
+                message: "settingUpdateSuccess",
+                setting: "autoSwitchIntervalHours",
+                value: hours,
+            });
+        });
+
         app.put("/api/settings/safety-settings-threshold", isAuthenticated, (req, res) => {
             const newThreshold = String(req.body?.value || "")
                 .trim()
@@ -1060,9 +1108,13 @@ class StatusRoutes {
         const allLogs = this.logger.logBuffer || [];
         const displayLogs = allLogs.slice(-limit);
         const accountNameMap = authSource.accountNameMap;
+        const accountTierMap = authSource.accountTierMap;
+        const accountTierCheckedAtMap = authSource.accountTierCheckedAtMap;
         const accountDetails = initialIndices.map(index => {
             const isInvalid = invalidIndices.includes(index);
             const name = isInvalid ? null : accountNameMap.get(index) || null;
+            const tier = isInvalid ? null : accountTierMap.get(index) || null;
+            const tierCheckedAt = isInvalid ? null : accountTierCheckedAtMap.get(index) || null;
 
             const canonicalIndex = isInvalid ? null : authSource.getCanonicalIndex(index);
             const isDuplicate = canonicalIndex !== null && canonicalIndex !== index;
@@ -1071,7 +1123,18 @@ class StatusRoutes {
 
             const hasContext = browserManager.contexts.has(index);
 
-            return { canonicalIndex, hasContext, index, isDuplicate, isExpired, isInvalid, isRotation, name };
+            return {
+                canonicalIndex,
+                hasContext,
+                index,
+                isDuplicate,
+                isExpired,
+                isInvalid,
+                isRotation,
+                name,
+                tier,
+                tierCheckedAt,
+            };
         });
 
         const currentAuthIndex = requestHandler.currentAuthIndex;
