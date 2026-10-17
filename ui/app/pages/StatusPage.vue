@@ -1762,26 +1762,6 @@
                             <p style="margin: 0 0 4px; font-size: 12px; opacity: 0.75">
                                 {{ t("atgClientSyntheticGuardDesc") }}
                             </p>
-                            <div class="switch-container">
-                                <span class="label">
-                                    <span>
-                                        {{ t("directSignerFallback") }}
-                                        <EnvVarTooltip
-                                            env-var="MAKERSUITE_DIRECT_FALLBACK"
-                                            doc-section="other-config"
-                                        />
-                                    </span>
-                                </span>
-                                <el-switch
-                                    v-model="state.makerSuiteDirectFallbackEnabled"
-                                    :width="50"
-                                    :disabled="!state.makerSuiteDirectEnabled"
-                                    :before-change="handleMakerSuiteFallbackBeforeChange"
-                                />
-                            </div>
-                            <p style="margin: 0 0 4px; font-size: 12px; opacity: 0.75">
-                                {{ t("directSignerFallbackDesc") }}
-                            </p>
                         </div>
                     </div>
                 </div>
@@ -3952,7 +3932,6 @@ const state = reactive({
     logScrollTop: 0,
 
     makerSuiteDirectEnabled: false,
-    makerSuiteDirectFallbackEnabled: false,
 
     maxContexts: 1,
 
@@ -4656,22 +4635,6 @@ const handleMakerSuiteDirectBeforeChange = async () => {
         !state.makerSuiteDirectEnabled,
         "directSignerEnabled"
     );
-    if (applied !== null && !applied) {
-        state.makerSuiteDirectFallbackEnabled = false;
-    }
-    updateContent();
-    return applied === null ? false : applied;
-};
-
-const handleMakerSuiteFallbackBeforeChange = async () => {
-    if (!state.makerSuiteDirectEnabled) {
-        return false;
-    }
-    const applied = await putBooleanSetting(
-        "/api/settings/maker-suite-direct-fallback",
-        !state.makerSuiteDirectFallbackEnabled,
-        "directSignerFallback"
-    );
     updateContent();
     return applied === null ? false : applied;
 };
@@ -4873,8 +4836,6 @@ const updateStatus = data => {
     };
     state.atgClientSyntheticGuardEnabled = data.status.atgClientSyntheticGuard !== false;
     state.makerSuiteDirectEnabled = data.status.makerSuiteDirect === true;
-    state.makerSuiteDirectFallbackEnabled =
-        state.makerSuiteDirectEnabled && data.status.makerSuiteDirectFallback === true;
     state.startupKeepaliveEnabled = isEnabled(data.status.startupKeepaliveEnabled);
     state.startupKeepaliveProgress = data.status.startupKeepaliveProgress || { current: 0, total: 0 };
     state.startupKeepaliveState = data.status.startupKeepaliveState || "inactive";

@@ -73,7 +73,6 @@ class ConfigLoader {
             httpPort: 7860,
             immediateSwitchStatusCodes: [429, 503],
             makerSuiteDirect: false,
-            makerSuiteDirectFallback: false,
             maxContexts: 1,
             maxRetries: 3,
             retryDelay: 2000,
@@ -106,9 +105,6 @@ class ConfigLoader {
         // Direct signer channel + ATG runtime switches (UI-togglable; env sets the baseline)
         if (process.env.MAKERSUITE_DIRECT) {
             config.makerSuiteDirect = process.env.MAKERSUITE_DIRECT.toLowerCase() === "on";
-        }
-        if (process.env.MAKERSUITE_DIRECT_FALLBACK) {
-            config.makerSuiteDirectFallback = process.env.MAKERSUITE_DIRECT_FALLBACK.toLowerCase() === "on";
         }
         if (process.env.ATG_CLIENT_SYNTHETIC_GUARD) {
             config.atgClientSyntheticGuard = process.env.ATG_CLIENT_SYNTHETIC_GUARD.toLowerCase() !== "off";

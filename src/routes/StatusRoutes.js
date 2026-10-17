@@ -863,18 +863,6 @@ class StatusRoutes {
             });
         });
 
-        app.put("/api/settings/maker-suite-direct-fallback", isAuthenticated, (req, res) => {
-            const enabled = req.body?.value === true;
-            const fallback = this.serverSystem.directSignerService.setFallbackEnabled(enabled);
-            this.logger.info(`[WebUI] Direct signer forced-tool auto-fallback switched to: ${fallback}`);
-
-            return res.status(200).json({
-                message: "settingUpdateSuccess",
-                setting: "makerSuiteDirectFallback",
-                value: fallback,
-            });
-        });
-
         app.put("/api/settings/debug-mode", isAuthenticated, (req, res) => {
             const currentLevel = LoggingService.getLevel();
             const newLevel = currentLevel === "DEBUG" ? "INFO" : "DEBUG";
@@ -1133,7 +1121,6 @@ class StatusRoutes {
                 isSystemBusy: requestHandler.isSystemBusy,
                 logMaxCount: limit,
                 makerSuiteDirect: this.serverSystem.directSignerService?.enabled === true,
-                makerSuiteDirectFallback: this.config.makerSuiteDirectFallback === true,
                 maxContexts: config.maxContexts,
                 maxRetries: config.maxRetries,
                 nextSwitchTimestamp: this.serverSystem.nextSwitchTimestamp || -1,

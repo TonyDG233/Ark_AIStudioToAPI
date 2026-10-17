@@ -120,8 +120,6 @@
     "deleteFailed": "删除失败：{message}",
     "directSignerDesc": "开启：生成请求改由页面签名器直发上游并逐帧回传，不经宿主代理通道；关闭：走默认原生通道。需要真流式、或原生通道不可用时建议开启。请求原样透传，强制工具等全部形态均支持。",
     "directSignerEnabled": "启用直连通道",
-    "directSignerFallback": "强制工具请求自动改走原生通道",
-    "directSignerFallbackDesc": "「强制工具」= 客户端要求模型必须调用指定工具（OpenAI/Claude 的 tool_choice 指定了具体工具、或 Gemini 的 toolConfig=ANY）。直连通道已完全支持这类请求；开启本项则把它们改走原生通道（保守偏好），其余请求仍走直连。默认关闭。",
     "directSignerTitle": "直连通道（Direct Signer）",
     "disabled": "已禁用",
     "disconnected": "连接中断",

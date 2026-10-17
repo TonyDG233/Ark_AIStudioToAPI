@@ -968,19 +968,6 @@ class DirectSignerService {
         return enabled;
     }
 
-    /**
-     * Forced-tool auto-fallback switch. Only effective while the channel is enabled;
-     * when the channel is off the value is forced to false (UI grays it out too).
-     */
-    setFallbackEnabled(value) {
-        const fallback = this.enabled ? !!value : false;
-        if (this.config) {
-            this.config.makerSuiteDirectFallback = fallback;
-        }
-        this.logger.info(`[DirectSigner] forced-tool auto-fallback switched ${fallback ? "ON" : "OFF"}`);
-        return fallback;
-    }
-
     async _injectIntoLivePages() {
         const browserManager = this.browserManager;
         if (!browserManager || !browserManager.contexts) return;
@@ -1067,35 +1054,6 @@ class DirectSignerService {
         }
         const match = String(proxyRequest.path || "").match(/\/v1beta\/models\/([^:/?]+):streamGenerateContent/);
         if (!match) return false;
-
-        // Optional forced-tool auto-route (UI switch, only meaningful while the
-        // channel is ON; default OFF). When enabled, requests that force a tool
-        // choice are delegated to the native path; with it off they ride the
-        // direct channel (ProxyStreamedCall carries them verbatim).
-        if (this.config && this.config.makerSuiteDirectFallback === true) {
-            const bodyText = typeof proxyRequest.body === "string" ? proxyRequest.body : "";
-            if (bodyText && /"tool_?[Cc]onfig"|"allowedFunctionNames"/.test(bodyText)) {
-                try {
-                    const googleBody = JSON.parse(bodyText);
-                    const toolConfig = googleBody.toolConfig || googleBody.tool_config;
-                    const functionCallingConfig = toolConfig && toolConfig.functionCallingConfig;
-                    if (
-                        functionCallingConfig &&
-                        ((functionCallingConfig.mode && String(functionCallingConfig.mode).toUpperCase() !== "AUTO") ||
-                            Array.isArray(functionCallingConfig.allowedFunctionNames))
-                    ) {
-                        this.logger.debug(
-                            `[DirectSigner] request=${requestId}: forced-tool auto-route ON — delegating to native path (toolConfig mode=${
-                                functionCallingConfig.mode || "AUTO"
-                            })`
-                        );
-                        return false;
-                    }
-                } catch {
-                    /* leave body validation to the page codec */
-                }
-            }
-        }
 
         // From here on the request IS a direct candidate: it is served by the direct
         // channel or refused with a visible error. There is deliberately NO automatic
