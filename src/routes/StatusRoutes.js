@@ -779,6 +779,29 @@ class StatusRoutes {
             res.status(200).json({ message: "settingUpdateSuccess", setting: "enableAuthUpdate", value: statusText });
         });
 
+        app.put("/api/settings/enable-auto-switch", isAuthenticated, (req, res) => {
+            this.config.enableAutoSwitch = !this.config.enableAutoSwitch;
+            const statusText = this.config.enableAutoSwitch;
+            this.logger.info(`[WebUI] Enable auto switch toggle switched to: ${statusText}`);
+            this.serverSystem.updateAutoSwitchTimer();
+            res.status(200).json({ message: "settingUpdateSuccess", setting: "enableAutoSwitch", value: statusText });
+        });
+
+        app.put("/api/settings/auto-switch-interval", isAuthenticated, (req, res) => {
+            const hours = parseFloat(req.body?.hours);
+            if (!Number.isFinite(hours) || hours < 0.1 || hours > 168) {
+                return res.status(400).json({ error: "Invalid auto switch interval", message: "settingFailed" });
+            }
+            this.config.autoSwitchIntervalHours = hours;
+            this.logger.info(`[WebUI] Auto switch interval updated to: ${hours} hours`);
+            this.serverSystem.updateAutoSwitchTimer();
+            return res.status(200).json({
+                message: "settingUpdateSuccess",
+                setting: "autoSwitchIntervalHours",
+                value: hours,
+            });
+        });
+
         app.put("/api/settings/safety-settings-threshold", isAuthenticated, (req, res) => {
             const newThreshold = String(req.body?.value || "")
                 .trim()
