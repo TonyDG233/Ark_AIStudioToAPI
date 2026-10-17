@@ -47,6 +47,27 @@ class GeminiHandler extends RetryHandler {
 
             const proxyRequest = this._buildProxyRequest(req, requestId);
             proxyRequest.is_generative = isGenerativeRequest;
+            // [ATG] synthetic-transport wrap for the native Gemini flow (same single
+            // injection semantics as the OpenAI/Responses/Claude flows). Non-text
+            // models and disabled mode pass through untouched.
+            if (isGenerativeRequest && req.method !== "GET" && proxyRequest.body) {
+                try {
+                    const googleBody = JSON.parse(proxyRequest.body);
+                    const atgWrap = this._applyAtgWrap(
+                        googleBody,
+                        "gemini",
+                        this._extractModelFromPath(proxyRequest.path) || ""
+                    );
+                    res.__atgToolName = atgWrap.toolName || "";
+                    res.__atgMode = atgWrap.mode || "";
+                    if (atgWrap.toolName) {
+                        proxyRequest.body = JSON.stringify(atgWrap.body);
+                    }
+                } catch (error) {
+                    res.__atgToolName = "";
+                    this.logger.warn(`[ATG] gemini wrap failed, proceeding without wrap: ${error.message}`);
+                }
+            }
             this._initializeProxyRequestAttempt(proxyRequest);
 
             const wantsStream = req.path.includes(":streamGenerateContent");
@@ -445,6 +466,7 @@ class GeminiHandler extends RetryHandler {
             res.type("text/event-stream");
         }
         this.logger.info(`[Request] Gemini streaming response (Real Mode) started...`);
+        const atgStreamUnwrapper = this._createAtgStreamUnwrapper(res);
         try {
             // eslint-disable-next-line no-constant-condition
             while (true) {
@@ -475,7 +497,11 @@ class GeminiHandler extends RetryHandler {
                 }
 
                 if (dataMessage.data) {
-                    this._logGeminiNativeChunkDebug(dataMessage.data, "stream");
+                    const atgData = this._processAtgStreamData(dataMessage.data, atgStreamUnwrapper, "gemini");
+                    if (atgData === null) {
+                        continue; // consumed by the ATG unwrapper (buffered or suppressed)
+                    }
+                    this._logGeminiNativeChunkDebug(atgData, "stream");
                     if (!this._isResponseWritable(res)) {
                         this.logger.debug(
                             "[Request] Response no longer writable during Gemini real stream; stopping stream."
@@ -483,7 +509,7 @@ class GeminiHandler extends RetryHandler {
                         break;
                     }
                     try {
-                        res.write(dataMessage.data);
+                        res.write(atgData.endsWith("\n\n") ? atgData : `${atgData}\n\n`);
                     } catch (writeError) {
                         this.logger.debug(
                             `[Request] Failed to write Gemini data chunk to stream: ${writeError.message}`
@@ -568,6 +594,10 @@ class GeminiHandler extends RetryHandler {
             try {
                 const fullResponse = JSON.parse(responseBodyBuffer.toString());
                 this._logGeminiNativeResponseDebug(fullResponse, "non-stream");
+                const unwrapped = this._unwrapAtgNonStreamResponse(fullResponse, res, "gemini");
+                if (unwrapped !== fullResponse) {
+                    responseBodyBuffer = Buffer.from(JSON.stringify(unwrapped));
+                }
             } catch (e) {
                 // Ignore JSON parsing errors for finish reason
             }

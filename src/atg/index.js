@@ -51,7 +51,8 @@ function createAtgProcessor(cfgOverrides = {}) {
 
         /**
          * Wrap an outgoing native Gemini request body.
-         * Returns { body, toolName, syntheticHit }.
+         * Returns { body, toolName, syntheticHit } (plus clientSynthetic when the
+         * client's own bypass mechanism was detected and the local wrap skipped).
          * Purging stale synthetic history happens here, before injection.
          * modelName: explicit model id (Gemini body has no top-level model field).
          */
